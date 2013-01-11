@@ -1,0 +1,227 @@
+======
+Kstate
+======
+
+.. note:: This is a start at documenting our intentions. Expect things to
+   change...
+
+What we want to be able to do
+=============================
+We have systems where process A is receiving data many times a second from an
+external source, and process B wants to be able to interrogate that data,
+either some appropriate frequency as it changes, or else whenever it sees fit.
+
+We thus have some assumptions:
+
+* Our initial system has one writer of state, and possibly many consumers.
+* The writer is likely to write amendments at high frequency.
+* Some of the consumers want to read the state at will - i.e., at essentially
+  random intervals.
+* Other consumers may want to read the state whenever it changes, or when it
+  changes but not more often than N times per second.
+* Different consumers are likely to have very different ideas of how often to
+  read the state.
+
+and some wishes:
+
+* We want transactions to wrap around reading/writing our state.
+* We'd like a system that fails on commit rather than on starting a
+  transaction - i.e., be optimistic about writing state.
+* We want transactions to be independent, irrespective of whether they're
+  nested or not - this has implications on when a write is visible.
+* We want to be able to choose to have persistent state, backed by a user
+  chosen file.
+* Optionally, we'd like to be able to send a KBUS message when commit
+  succeeds (this may get added late).
+
+and some limitations we want to set:
+
+* The system can manage more than one state.
+* The size of state should be choosable by the user, but with a maximum size
+  of one page.
+
+Thinking around an API
+======================
+A state, S, is identified by a string. There will be some maximum length to
+that string, to be determined.
+
+A process starts using a state by getting a handle to it::
+
+  <state> = kstate_subscribe(state_name, permissions)
+
+where ``permissions`` is some combination of ``read`` and ``write`` flags.
+
+This returns an opaque handle on the state, ``<state>``.
+
+If the state does not yet exist, then this will create it.
+
+Data for the state will be memory mapped. The size of the mapping will default
+to one page, but there will (eventually) be a call to change its size::
+
+  err = kstate_set_size(<state>, size_in_bytes)
+
+If no-one has yet written to the state, then this can set the state size to
+anything from 1 to the page size. After the state has been written to, this
+can only increase the state size.
+
+By default, the state will not be persistent - that is, it will evaporate when
+no active processes are subscribed to it. Alternatively, it can be backed by a
+(persistent) file::
+
+  err = kstate_set_persistent(<state>, filename)
+
+This will fail if the state is already persistent with a different filename.
+It is not possible to make a persistent state transient again.
+
+A call *may* be provided to delete a state::
+
+  err = kstate_delete(<state>)
+
+This would fail if any (other) processes are still subscribed to the state.
+If this call succeeds, then any subsequent attempt to use the state would fail.
+This call would be allowed for both persistent and transient states.
+
+Once a state has been acquired it will probably not be readable until someone
+has written to it. In other words, it may not be sensible to assume that the
+initial state makes sense. Alternatively, it may be that a read of an
+uninitialised state causes it to be set to all zeroes.
+
+Reading the current data for a state can be done by acquiring a pointer to
+it::
+
+  ptr = kstate_get_ptr(<state>)
+
+This pointer is into shared memory.
+
+.. note:: How long is it valid? Do we need to explicitly start a transaction
+   in order to be able to read our state?
+
+Manipulating a state requires a transaction to be started::
+
+  <transaction> = kstate_start_transaction(<state>)
+
+.. note:: Can one take out a transaction on a read-only state?
+
+One can then acquire a pointer to the state's data::
+
+  ptr = kstate_get_ptr(<transaction>)
+
+which returns a pointer to a version of the state's data which may be altered.
+This pointer may be used until the transaction is committed or aborted, after
+which it should be regarded as invalid.
+
+Aborting a transaction (and throwing away any changes) is done with::
+
+  err = kstate_abort(<transaction>)
+
+This should generally succeed.
+
+An attempt may be made to commit the transaction::
+
+  err = kstate_commit(<transaction>)
+
+If no writes were made using the transaction, then this may be treated as
+being identical to an abort of the transaction.
+
+The commit will fail if someone else has changed the data for the state since
+the start of the transaction.
+
+If the commit fails, then the caller should "back off" and retry the
+whole transaction again.
+
+.. note:: Doing it like this enables us to ensure that a system can
+   eventually do "what it wants" without blocking, by intelligent
+   "backing off".
+
+Future versions of the library may provide a mechanism to allow retrying
+transactions - probably of the form::
+
+  err = kstate_transaction_using_fn(<state>, fn, retry)
+
+where ``fn`` looks like::
+
+  int fn(<transaction>, ptr) {
+     .. do things with ptr ..
+     return success/failure code
+  }
+
+This would do::
+
+  start transaction
+    call fn within that transaction
+    try to commit
+    if it fails, and 'retry' is true, then back off,
+       and then continue with a new 'start transaction'
+
+We don't explicitly support nested transactions, but we also don't forbid
+them. The visibility of state if you *do* nest transactions will be whatever
+it happens to be.
+
+Future versions of the library may make it simple to send a KBUS message when
+a commit succeeds.
+
+We will provide some means of polling for changes to a state. This may mean
+acquiring a file descriptor from the library and polling on that (this would
+be the preferred mechanism).
+
+We will provide some means of saying:
+
+  "for this ``<state>``, the data we can see for it should not appear to be
+  updated more than once every R seconds".
+
+Later versions of the library will support adding other states to a
+transaction. See the notes below.
+
+Notes
+=====
+.. note:: Some of these have already been folded into the above.
+
+Commit fails if someone else has changed the state since we started our
+transaction.
+
+    commit should probably:
+
+    * allocate a page ready for the *next* transaction
+    * mark that page as noread, nowrite, noexec
+      
+      - the next transaction will then catch a page fault when someone
+        does try to read/write/exec it, and can (1) mark it appropriately
+        and (2) copy the current (at start of transaction) state over
+        (so a lazy copy)
+
+    * commit can then check if a write has happened to the state.
+      If someone else wrote to it, then the commit fails.
+
+If a commit fails, the caller needs to back off and try again. It's then
+possible to write algorithms to guarantee that the commit can succeed
+eventually, by backing off for random periods, or just flipping a coin, etc.
+
+NB: we definitely enforce a maximum state size of one page.
+
+Persistence: a state starts off as non-persistent. Then allow a call to make
+it persisent (and specify a file, so we can decide whether its on/off NAND,
+etc., ect.).
+
+    "transactions are independent, irrespective of whether they're nested or
+    not".
+
+In other words, avoid caring about inner/outer transactions by saying that a
+commit succeeds or not at the moment of commit, independent of other
+transactions.
+
+Provide a means of adding states to a transaction, to mean (explicitly) that
+the commit is of all those states. NB: This can possibly abort at the "start
+transaction" call, if it can see that it will actually be impossible to
+succeed in committing when the user does eventually try to commit.
+
+Make the state be associated with a file descriptor, and we can then poll on
+it for when the state changes. (Does this come for free with memory mapping?)
+
+We also want to be able to mark the state handle to say "when I look at this
+state, and the state is being updated too frequently, I don't want to see the
+latest update, but the update as if it were being done at THIS frequency".
+
+Useful references: Keir Frasier's papers on concurrent programming without
+locks, including his thesis "Practical lock-freedom".
+
+.. vim: set filetype=rst tabstop=8 softtabstop=2 shiftwidth=2 expandtab:
