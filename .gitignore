@@ -1,0 +1,34 @@
+# Editor backup files
+*~
+*.swp
+*.swo
+*.bak
+
+# KDE directory view info
+.directory
+
+# Eclipse project files
+.project
+.cproject
+
+# Build artefacts
+# - from kernel building
+*.cmd
+*.ko
+*.o
+*.rules
+kbus.mod.c
+modules.order
+Module.symvers
+.tmp_versions
+
+# - from userspace
+*.a
+*.so
+*.class
+*.jar
+*.pyc
+jkbus/java/include/com_kynesim_kbus_KMessage.h
+jkbus/java/include/com_kynesim_kbus_Ksock.h
+utils/kmsg
+utils/runlimpet
