@@ -25,6 +25,7 @@
  * ***** END LICENSE BLOCK *****
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -34,7 +35,7 @@
 /*
  * Subscribe to a state.
  *
- * - ``state_name`` is the name of the state to subscribe to.
+ * - ``name`` is the name of the state to subscribe to.
  * - ``permissions`` is constructed by OR'ing the permission flags
  *   KSTATE_READ and/or KSTATE_WRITE. At least one of those must be given.
  * - ``state`` is the actual state identifier, as newly constructed by this
@@ -51,19 +52,25 @@
  * The negative value will be ``-errno``, giving an indication of why the
  * function failed.
  */
-extern int kstate_subscribe(const char               *state_name,
+extern int kstate_subscribe(const char               *name,
                             enum kstate_permissions   permissions,
                             struct kstate_state     **state)
 {
+  printf("Subscribing to '%s' for 0x%x\n", name, permissions);
   struct kstate_state *new = malloc(sizeof(*state));
   if (!new) return -ENOMEM;
 
-  new->name = malloc(strlen(state_name) + 1);
+  size_t name_len = strlen(name);
+  if (name_len == 0) {
+    return -EINVAL;
+  }
+
+  new->name = malloc(name_len + 1);
   if (!new->name) {
     free(new);
     return -ENOMEM;
   }
-  strcpy(new->name, state_name);
+  strcpy(new->name, name);
 
   new->permissions = permissions;
 

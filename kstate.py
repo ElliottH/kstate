@@ -7,6 +7,7 @@ NB: Uses Python 3
 
 import sys
 import os
+import errno
 
 import ctypes
 from ctypes import c_char_p, c_int, c_uint32
@@ -88,7 +89,7 @@ class KstateLibrary(object):
     def subscribe(self, name, permissions):
         print('Subscribing to %s for %s'%(name, self._perm_str(permissions)))
         ptr_to_state = POINTER(State)()
-        ret = self.fn_subscribe(b"Fred", 1, byref(ptr_to_state))
+        ret = self.fn_subscribe(name, permissions, byref(ptr_to_state))
         if ret:
             print('Returns {0}'.format(ret))
             raise Error('Error subscribing to %s for %s'%(name,
@@ -117,9 +118,19 @@ def main(args):
 
     lib = KstateLibrary()
 
+    print('--- Subscribing to Fred')
     state = lib.subscribe(b"Fred", KSTATE_READ|KSTATE_WRITE|0x8)
 
+    print('--- Unsubscribing to Fred')
     lib.unsubscribe(state)
+
+    try:
+        print('--- Failing to subscribe to ""')
+        state = lib.subscribe(b"", KSTATE_READ)
+    except Error as e:
+        print('Got', e)
+        if e.errno != errno.EINVAL:
+            raise ValueError('Got wrong errno value')
 
 
 if __name__ == '__main__':
