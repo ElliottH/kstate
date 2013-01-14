@@ -51,6 +51,10 @@ A process starts using a state by getting a handle to it::
 
 where ``permissions`` is some combination of ``read`` and ``write`` flags.
 
+Obviously, if the user subscribes with just ``read``, then they will not be
+able to write to the state. Whether we allow just ``write``, or only allow
+``read+write`` is to be decided.
+
 This returns an opaque handle on the state, ``<state>``.
 
 If the state does not yet exist, then this will create it.
@@ -102,13 +106,20 @@ Manipulating a state requires a transaction to be started::
 
 .. note:: Can one take out a transaction on a read-only state?
 
+   Yes, because it gives a "frozen" view of the state. However, either
+   ``commit`` and ``abort`` are identical for such a transaction, or
+   else we only allow ``abort`` - this is to be decided.
+
 One can then acquire a pointer to the state's data::
 
   ptr = kstate_get_ptr(<transaction>)
 
-which returns a pointer to a version of the state's data which may be altered.
-This pointer may be used until the transaction is committed or aborted, after
-which it should be regarded as invalid.
+which returns a pointer to a version of the state's data. This will be
+identical to the state data at the time of starting the transaction, and will
+not change if someone else edits the state. It may be altered via the pointer,
+which may be used until the transaction is committed or aborted. After the
+transaction is committed or aborted, the pointer should be regarded as
+invalid.
 
 Aborting a transaction (and throwing away any changes) is done with::
 

@@ -15,7 +15,7 @@
  * The Original Code is the KBUS State library.
  *
  * The Initial Developer of the Original Code is Kynesim, Cambridge UK.
- * Portions created by the Initial Developer are Copyright (C) 2012
+ * Portions created by the Initial Developer are Copyright (C) 2013
  * the Initial Developer. All Rights Reserved.
  *
  * Contributor(s):
@@ -42,8 +42,8 @@ enum kstate_permissions {
 typedef enum kstate_permissions kstate_permissions_t;
 
 struct kstate_state {
-  const char    *name;
-
+  char        *name;
+  uint32_t     permissions;
 };
 typedef struct kstate_state kstate_state_t;
 

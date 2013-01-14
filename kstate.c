@@ -12,10 +12,10 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is the KBUS State library.
+ * The Original Code is the BUS State library.
  *
  * The Initial Developer of the Original Code is Kynesim, Cambridge UK.
- * Portions created by the Initial Developer are Copyright (C) 2012
+ * Portions created by the Initial Developer are Copyright (C) 2013
  * the Initial Developer. All Rights Reserved.
  *
  * Contributor(s):
@@ -25,6 +25,8 @@
  * ***** END LICENSE BLOCK *****
  */
 
+#include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 
 #include "kstate.h"
@@ -53,7 +55,20 @@ extern int kstate_subscribe(const char               *state_name,
                             enum kstate_permissions   permissions,
                             struct kstate_state     **state)
 {
-  return -EPERM;
+  struct kstate_state *new = malloc(sizeof(*state));
+  if (!new) return -ENOMEM;
+
+  new->name = malloc(strlen(state_name) + 1);
+  if (!new->name) {
+    free(new);
+    return -ENOMEM;
+  }
+  strcpy(new->name, state_name);
+
+  new->permissions = permissions;
+
+  *state = new;
+  return 0;
 }
 
 /*
@@ -62,9 +77,7 @@ extern int kstate_subscribe(const char               *state_name,
  * - ``state`` is the state from which to unsubscribe.
  *
  * After this, the content of the state datastructure will have been
- * unset - it will no longer be a valid state.
- *
- * Also, any attempt to use pointers into the state data will fail.
+ * unset/freed, and ``state`` itself will have been freed.
  *
  * Note that transactions using the state keep their own copy of the state
  * information, and are not affected by this function - i.e., the state can
@@ -76,5 +89,22 @@ extern int kstate_subscribe(const char               *state_name,
  */
 extern int kstate_unsubscribe(struct kstate_state   **state)
 {
-  return -EPERM;
+  if (*state) {
+    if ((*state)->name) {
+      free((*state)->name);
+      (*state)->name = NULL;
+    }
+    (*state)->permissions = 0;
+    free(*state);
+    *state = NULL;
+  }
+  return 0;
 }
+
+// vim: set tabstop=8 softtabstop=2 shiftwidth=2 expandtab:
+//
+// Local Variables:
+// tab-width: 8
+// indent-tabs-mode: nil
+// c-basic-offset: 2
+// End:

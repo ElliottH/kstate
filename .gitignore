@@ -17,7 +17,7 @@
 *.ko
 *.o
 *.rules
-kbus.mod.c
+*.mod.c
 modules.order
 Module.symvers
 .tmp_versions
@@ -28,7 +28,3 @@ Module.symvers
 *.class
 *.jar
 *.pyc
-jkbus/java/include/com_kynesim_kbus_KMessage.h
-jkbus/java/include/com_kynesim_kbus_Ksock.h
-utils/kmsg
-utils/runlimpet
