@@ -12,7 +12,7 @@ import errno
 import ctypes
 from ctypes import c_char_p, c_int, c_uint32
 from ctypes import Structure
-from ctypes import POINTER, byref
+from ctypes import POINTER, pointer, byref
 
 THIS_DIR = os.path.split(__file__)[0]
 
@@ -124,6 +124,10 @@ class KstateLibrary(object):
         print('unsubscribe', self.fn_unsubscribe)
 
     def subscribe(self, name, permissions):
+        """Subscribe to state 'name' with the given 'permissions'
+
+        The state name must be a byte string (b"xxx").
+        """
         ptr_to_state = POINTER(State)()
         ret = self.fn_subscribe(name, permissions, byref(ptr_to_state))
         if ret:
@@ -133,10 +137,12 @@ class KstateLibrary(object):
         return state
 
     def unsubscribe(self, state):
+        """Unsubscribe from this state.
+        """
         name = state.name
         permissions = state.permissions
 
-        ptr_to_state = POINTER(State)()
+        ptr_to_state = pointer(state)
         ret = self.fn_unsubscribe(byref(ptr_to_state))
         if ret:
             raise Error('Error unsubscribing from %s for %s'%(name,

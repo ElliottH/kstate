@@ -55,7 +55,7 @@ Obviously, if the user subscribes with just ``read``, then they will not be
 able to write to the state. Whether we allow just ``write``, or only allow
 ``read+write`` is to be decided.
 
-This returns an opaque handle on the state, ``<state>``.
+This returns a handle on the state, ``<state>``.
 
 If the state does not yet exist, then this will create it.
 

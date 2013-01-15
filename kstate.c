@@ -101,6 +101,29 @@ static bool kstate_permissions_are_bad(uint32_t permissions)
 }
 
 /*
+ * Print a representation of 'state' on output 'stream'.
+ *
+ * Assumes the state is valid.
+ *
+ * If 'start' is non-NULL, print it before the state (with no added whitespace).
+ * If 'eol' is true, then print a newline after the state.
+ */
+extern void print_state(FILE *stream, char *start, struct kstate_state *state, bool eol)
+{
+  if (start)
+    fprintf(stream, "%s", start);
+  fprintf(stream, "State '%s' for ", state->name);
+  if (state->permissions & KSTATE_READ)
+    fprintf(stream, "read");
+  if (state->permissions & (KSTATE_READ|KSTATE_WRITE))
+    fprintf(stream, "|");
+  if (state->permissions & KSTATE_WRITE)
+    fprintf(stream, "write");
+  if (eol)
+    fprintf(stream, "\n");
+}
+
+/*
  * Subscribe to a state.
  *
  * - ``name`` is the name of the state to subscribe to.
@@ -170,6 +193,8 @@ extern int kstate_subscribe(const char               *name,
 extern int kstate_unsubscribe(struct kstate_state   **state)
 {
   if (*state) {
+    print_state(stdout, "Unsubscribing from ", *state, true);
+
     if ((*state)->name) {
       free((*state)->name);
       (*state)->name = NULL;
@@ -177,6 +202,8 @@ extern int kstate_unsubscribe(struct kstate_state   **state)
     (*state)->permissions = 0;
     free(*state);
     *state = NULL;
+  } else {
+    printf("Unsubscribing from NULL state\n");
   }
   return 0;
 }
