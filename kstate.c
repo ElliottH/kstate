@@ -29,8 +29,76 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <ctype.h>    # for isalnum
 
 #include "kstate.h"
+
+/*
+ * Given a message name, is it valid?
+ *
+ * We have nothing to say on maximum length.
+ *
+ * Returns the name length if it's OK, 0 if it's naughty
+ */
+static int kstate_check_message_name(const char *name)
+{
+  size_t ii;
+  int dot_at = 1;
+
+  if (name == NULL) {
+    fprintf(stderr, "!!! kstate_subscribe: State name may not be NULL\n");
+    return 0;
+  }
+
+  size_t name_len = strlen(name);
+
+  if (name_len == 0) {
+    fprintf(stderr, "!!! kstate_subscribe: State name may not be zero length\n");
+    return 0;
+  }
+
+  if (name[0] == '.' || name[name_len-1] == '.') {
+    fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not start or"
+            " end with '.'\n", name);
+    return 0;
+  }
+
+  for (ii = 0; ii < name_len; ii++) {
+    if (name[ii] == '.') {
+      if (dot_at == ii - 1) {
+        fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not have"
+                " adjacent '.'s\n", name);
+        return 0;
+      }
+      dot_at = ii;
+    } else if (!isalnum(name[ii])) {
+      fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not"
+              " contain '%c' (not alphanumeric)\n", name, name[ii]);
+      return 0;
+    }
+  }
+  return name_len;
+}
+
+/*
+ * Given state permissions, are they valid?
+ *
+ * Returns true if they're bad, false if we like them
+ */
+static bool kstate_permissions_are_bad(uint32_t permissions)
+{
+  if (!permissions) {
+    fprintf(stderr, "!!! kstate_subscribe: Unset permissions bits (0x0) not allowed\n");
+    return true;
+  }
+  else if (permissions & ~(KSTATE_READ | KSTATE_WRITE)) {
+    fprintf(stderr, "!!! kstate_subscribe: Unexpected permission bits 0x%x in 0x%x\n",
+            permissions & ~(KSTATE_READ | KSTATE_WRITE),
+            permissions);
+    return true;
+  }
+  return false;
+}
 
 /*
  * Subscribe to a state.
@@ -58,16 +126,12 @@ extern int kstate_subscribe(const char               *name,
 {
   printf("Subscribing to '%s' for 0x%x\n", name, permissions);
 
-  if (permissions & ~(KSTATE_READ | KSTATE_WRITE)) {
-    fprintf(stderr, "!!! kstate_subscribe: Unexpected permission bits 0x%x in 0x%x\n",
-            permissions & ~(KSTATE_READ | KSTATE_WRITE),
-            permissions);
+  if (kstate_permissions_are_bad(permissions)) {
     return -EINVAL;
   }
 
-  size_t name_len = strlen(name);
+  size_t name_len = kstate_check_message_name(name);
   if (name_len == 0) {
-    fprintf(stderr, "!!! kstate_subscribe: State name may not be zero length\n");
     return -EINVAL;
   }
 

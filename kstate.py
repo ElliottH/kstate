@@ -77,14 +77,33 @@ class Error(Exception):
             parts.append('%d'%self.errno)
         return 'Error(%s)'%(', '.join(parts))
 
+def permission_str(permissions):
+    parts = []
+    if permissions & KSTATE_READ:
+        parts.append('read')
+    if permissions & KSTATE_WRITE:
+        parts.append('write')
+    if permissions & ~(KSTATE_READ|KSTATE_WRITE):
+        parts.append('0x%x'%(permissions & ~(KSTATE_READ|KSTATE_WRITE)))
+    if parts:
+        return '|'.join(parts)
+    else:
+        return '0x0'
+
 class State(Structure):
     _fields_ = [('name', c_char_p),
                 ('permissions', c_uint32)
                ]
 
+    def __str__(self):
+        return 'State {0} for {1}'.format(self.name, permission_str(self.permissions))
+
 class Transaction(Structure):
     _fields_ = [('state', State),
                ]
+
+    def __str__(self):
+        return 'Transaction on {0}'.format(self.state)
 
 class KstateLibrary(object):
 
@@ -104,82 +123,106 @@ class KstateLibrary(object):
         self.fn_unsubscribe.argtypes = [POINTER(POINTER(State))]
         print('unsubscribe', self.fn_unsubscribe)
 
-    def _perm_str(self, permissions):
-        parts = []
-        if permissions & KSTATE_READ:
-            parts.append('read')
-        if permissions & KSTATE_WRITE:
-            parts.append('write')
-        if permissions & ~(KSTATE_READ|KSTATE_WRITE):
-            parts.append('0x%x'%(permissions & ~(KSTATE_READ|KSTATE_WRITE)))
-        if parts:
-            return '|'.join(parts)
-        else:
-            return '0x0'
-
     def subscribe(self, name, permissions):
-        print('Subscribing to %s for %s'%(name, self._perm_str(permissions)))
         ptr_to_state = POINTER(State)()
         ret = self.fn_subscribe(name, permissions, byref(ptr_to_state))
         if ret:
-            print('Returns {0}'.format(ret))
             raise Error('Error subscribing to %s for %s'%(name,
-                self._perm_str(permissions)), -ret)
-        print('State ptr is NULL: {0}'.format(not bool(ptr_to_state)))
+                        permission_str(permissions)), -ret)
         state = ptr_to_state[0]
-        print(state.name)
-        print(state.permissions)
         return state
 
     def unsubscribe(self, state):
         name = state.name
         permissions = state.permissions
-        print('Unsubscribing from %s for %s'%(name, self._perm_str(permissions)))
 
         ptr_to_state = POINTER(State)()
         ret = self.fn_unsubscribe(byref(ptr_to_state))
         if ret:
-            print('Returns {0}'.format(ret))
             raise Error('Error unsubscribing from %s for %s'%(name,
-                self._perm_str(permissions)), -ret)
-        print('Returns {0}'.format(ret))
-        print('State ptr is NULL: {0}'.format(not bool(ptr_to_state)))
+                        permission_str(permissions)), -ret)
+
+def expect_success(what, fn, *args, **kwargs):
+    print('\n--- Test {0}'.format(what))
+    val = fn(*args, **kwargs)
+    print('... Call of {0} succeeded, returned {1}'.format(fn.__name__, val))
+    return val
+
+def expect_failure(what, expected_errno, fn, *args, **kwargs):
+    print('\n--- Test {0}'.format(what))
+    try:
+        val = fn(*args, **kwargs)
+        raise GiveUp('Expected failure, but call of {0} succeeded,'
+                     ' returning {1}'.format(fn.__name__, val))
+    except Error as e:
+        print('Expected failure, and call of {0} failed'
+              ' with:\n  {1}'.format(fn.__name__, e))
+        if e.errno == expected_errno:
+            print('...which was what we wanted')
+        else:
+            raise ValueError('xxx Got wrong errno value, expected {0}'.format(expected_errno))
+
+def expect_state(state, name, permissions):
+    if not state:
+        raise GiveUp('Expected state {0}, but state is NULL'.format(state))
+    if state.name != name:
+        raise GiveUp('Expected state with name {0}, but got {1}'.format(name, state))
+    if state.permissions != permissions:
+        raise GiveUp('Expected state with permissions {} ({}), but got {}'.format(permissions,
+            permission_str(permissions), state))
 
 def main(args):
 
     lib = KstateLibrary()
 
-    print('\n--- Subscribing to Fred')
-    state = lib.subscribe(b"Fred", KSTATE_READ|KSTATE_WRITE)
-    if not state:
-        raise GiveUp('Error subscribing')
+    state = expect_success('Subscribing to a simple name',
+                           lib.subscribe, b'Fred', KSTATE_READ|KSTATE_WRITE)
+    expect_state(state, b'Fred', KSTATE_READ|KSTATE_WRITE)
 
-    print('\n--- Unsubscribing to Fred')
-    lib.unsubscribe(state)
+    expect_success('Unsubscribing',
+                   lib.unsubscribe, state)
 
-    try:
-        print('\n--- Failing to subscribe to ""')
-        state = lib.subscribe(b"", KSTATE_READ)
-        if state:
-            raise GiveUp('Unexpectedly succeeded in subscribing')
-    except Error as e:
-        print('Got', e)
-        if e.errno == errno.EINVAL:
-            print('...which was what we wanted')
-        else:
-            raise ValueError('Got wrong errno value')
+    state = expect_success('Subscribing to a name with a "." in it',
+                           lib.subscribe, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
+    expect_state(state, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
 
-    try:
-        print('\n--- Failing to subscribe to "Fred" with permission bits 0xF')
-        state = lib.subscribe(b"Fred", 0xF)
-        if state:
-            raise GiveUp('Unexpectedly succeeded in subscribing')
-    except Error as e:
-        print('Got', e)
-        if e.errno == errno.EINVAL:
-            print('...which was what we wanted')
-        else:
-            raise ValueError('Got wrong errno value')
+    expect_success('Unsubscribing',
+                   lib.unsubscribe, state)
+
+    state = expect_success('Subscribing with just READ permission',
+                           lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    expect_state(state, b'Fred.Jim', KSTATE_READ)
+
+    expect_success('Unsubscribing',
+                   lib.unsubscribe, state)
+
+    state = expect_success('Subscribing with just WRITE permission',
+                           lib.subscribe, b'Fred.Jim', KSTATE_WRITE)
+    expect_state(state, b'Fred.Jim', KSTATE_WRITE)
+
+    expect_success('Unsubscribing',
+                   lib.unsubscribe, state)
+
+    expect_failure('Failing to subscribe to a zero length name', errno.EINVAL,
+                   lib.subscribe, b"", KSTATE_READ)
+
+    expect_failure('Failing to subscribe to a name starting with "."', errno.EINVAL,
+                   lib.subscribe, b".Fred", KSTATE_READ)
+
+    expect_failure('Failing to subscribe to a name ending with "."', errno.EINVAL,
+                   lib.subscribe, b"Fred.", KSTATE_READ)
+
+    expect_failure('Failing to subscribe to a name with adjacent "."s', errno.EINVAL,
+                   lib.subscribe, b"Fred..Bob", KSTATE_READ)
+
+    expect_failure('Failing to subscribe to a name with non-alphanumerics', errno.EINVAL,
+                   lib.subscribe, b"Fred&Bob", KSTATE_READ)
+
+    expect_failure('Failing to subscribe with permission bits 0x0', errno.EINVAL,
+                   lib.subscribe, b"Fred", 0x0)
+
+    expect_failure('Failing to subscribe with permission bits 0xF', errno.EINVAL,
+                   lib.subscribe, b"Fred", 0xF)
 
 
 if __name__ == '__main__':
