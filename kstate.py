@@ -121,7 +121,7 @@ class KstateLibrary(object):
         self.lib = ctypes.CDLL(self.location)
 
         self.fn_subscribe = self.lib.kstate_subscribe
-        self.fn_subscribe.argtypes = [c_char_p, c_int, POINTER(State)]
+        self.fn_subscribe.argtypes = [POINTER(State), c_char_p, c_int]
         print('subscribe', self.fn_subscribe)
 
         self.fn_unsubscribe = self.lib.kstate_unsubscribe
@@ -129,7 +129,7 @@ class KstateLibrary(object):
         print('unsubscribe', self.fn_unsubscribe)
 
         self.fn_start_transaction = self.lib.kstate_start_transaction
-        self.fn_start_transaction.argtypes = [POINTER(State), POINTER(Transaction)]
+        self.fn_start_transaction.argtypes = [POINTER(Transaction), POINTER(State)]
         print('start_transaction', self.fn_start_transaction)
 
     def subscribe(self, name, permissions):
@@ -138,7 +138,7 @@ class KstateLibrary(object):
         The state name must be a byte string (b"xxx").
         """
         state = State(0,0)
-        ret = self.fn_subscribe(name, permissions, byref(state))
+        ret = self.fn_subscribe(byref(state), name, permissions)
         if ret:
             raise Error('Error subscribing to %s for %s'%(name,
                         permission_str(permissions)), -ret)
@@ -152,13 +152,11 @@ class KstateLibrary(object):
     def start_transaction(self, state):
         """Start a transaction on state 'name'
         """
-        if not state:
-            raise GiveUp('Cannot start transaction on {}'.format(state))
-        ptr_to_transaction = POINTER(Transaction)()
-        ret = self.fn_start_transaction(byref(state), byref(ptr_to_transaction))
+        null_state = State(0,0)
+        transaction = Transaction(null_state)
+        ret = self.fn_start_transaction(byref(transaction), byref(state))
         if ret:
-            raise Error('Error starting transaction on %s'%(state))
-        transaction = ptr_to_transaction[0]
+            raise Error('Error starting transaction on {}'.format(state), -ret)
         return transaction
 
 def expect_success(what, fn, *args, **kwargs):
@@ -215,22 +213,19 @@ def main(args):
                            lib.subscribe, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
     expect_state(state, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
 
-    expect_success('Unsubscribing',
-                   lib.unsubscribe, state)
+    expect_success('Unsubscribing', lib.unsubscribe, state)
 
     state = expect_success('Subscribing with just READ permission',
                            lib.subscribe, b'Fred.Jim', KSTATE_READ)
     expect_state(state, b'Fred.Jim', KSTATE_READ)
 
-    expect_success('Unsubscribing',
-                   lib.unsubscribe, state)
+    expect_success('Unsubscribing', lib.unsubscribe, state)
 
     state = expect_success('Subscribing with just WRITE permission',
                            lib.subscribe, b'Fred.Jim', KSTATE_WRITE)
     expect_state(state, b'Fred.Jim', KSTATE_WRITE)
 
-    expect_success('Unsubscribing',
-                   lib.unsubscribe, state)
+    expect_success('Unsubscribing', lib.unsubscribe, state)
 
     print('xxx unsubscribed state', state, bool(state))
 
@@ -255,15 +250,15 @@ def main(args):
     expect_failure('Failing to subscribe with permission bits 0xF', errno.EINVAL,
                    lib.subscribe, b"Fred", 0xF)
 
-    # Our current 'state' is unsubscribed, so this should fail:
-    expect_giveup('Failing to start transaction with unsubscribed state',
-                  lib.start_transaction, state)
+    state = expect_success('Subscribing with just READ permission',
+                           lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    transaction = expect_success('Starting a transaction on our last state',
+                                lib.start_transaction, state)
+    print('Got', transaction)
 
-    #state = expect_success('Subscribing with just READ permission',
-    #                       lib.subscribe, b'Fred.Jim', KSTATE_READ)
-    #transaction = expect_success('Starting a transaction on our last state',
-    #                            lib.start_transaction, state)
-    #print('Got', transaction)
+    expect_success('Unsubscribing', lib.unsubscribe, state)
+    expect_failure('Failing to start transaction with unsubscribed state', errno.EINVAL,
+                   lib.start_transaction, state)
 
 
 if __name__ == '__main__':

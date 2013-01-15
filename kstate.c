@@ -144,7 +144,9 @@ extern void print_state(FILE *stream, char *start, struct kstate_state *state, b
  */
 extern struct kstate_state *kstate_create_state()
 {
-  return malloc(sizeof(struct kstate_state));
+  struct kstate_state *new = malloc(sizeof(struct kstate_state));
+  memset(new, 0, sizeof(*new));
+  return new;
 }
 
 /*
@@ -156,6 +158,7 @@ extern struct kstate_state *kstate_create_state()
 extern void kstate_free_state(struct kstate_state **state)
 {
   if (*state) {
+    kstate_unsubscribe(*state);
     free(*state);
     *state = NULL;
   }
@@ -183,9 +186,9 @@ extern void kstate_free_state(struct kstate_state **state)
  * The negative value will be ``-errno``, giving an indication of why the
  * function failed.
  */
-extern int kstate_subscribe(const char              *name,
-                            enum kstate_permissions  permissions,
-                            struct kstate_state     *state)
+extern int kstate_subscribe(struct kstate_state     *state,
+                            const char              *name,
+                            enum kstate_permissions  permissions)
 {
   printf("Subscribing to '%s' for 0x%x\n", name, permissions);
 
@@ -202,7 +205,6 @@ extern int kstate_subscribe(const char              *name,
 
   state->name = malloc(name_len + 1);
   if (!state->name) {
-    free(state);
     return -ENOMEM;
   }
   strcpy(state->name, name);
@@ -216,7 +218,7 @@ extern int kstate_subscribe(const char              *name,
  * - ``state`` is the state from which to unsubscribe.
  *
  * After this, the content of the state datastructure will have been
- * unset/freed.
+ * unset/freed. Unsubscribing from the same state again will have no effect.
  *
  * Note that transactions using the state keep their own copy of the state
  * information, and are not affected by this function - i.e., the state can
@@ -241,41 +243,86 @@ extern void kstate_unsubscribe(struct kstate_state   *state)
 }
 
 /*
+ * Create a new "empty" transaction.
+ *
+ * The normal usage is to create an empty transaction and then immediately
+ * populate it::
+ *
+ *     struct kstate_transaction *transaction = kstate_create_transaction();
+ *     int ret = kstate_start_transaction(&transaction, state);
+ *
+ * and then eventually to destroy it:
+ *
+ *     int ret = kstate_unsubscribe(transaction);
+ *     if (ret) {
+ *       // deal with the error
+ *     }
+ *     kstate_destroy(&transaction);
+ *
+ * Returns the new transaction, or NULL if there was insufficient memory.
+ */
+extern struct kstate_transaction *kstate_create_transaction()
+{
+  struct kstate_transaction *new = malloc(sizeof(struct kstate_transaction));
+  memset(new, 0, sizeof(*new));
+  return new;
+}
+
+/*
+ * Destroy a transaction created with 'kstate_create_transaction'.
+ *
+ * If a NULL pointer is given, then it is ignored, otherwise the transaction is
+ * freed and the pointer 'transaction' is set to NULL.
+ */
+extern void kstate_free_transaction(struct kstate_transaction **transaction)
+{
+  if (*transaction) {
+    //kstate_abort_transaction(*transaction);
+    free(*transaction);
+    *transaction = NULL;
+  }
+}
+
+/*
  * Start a new transaction on a state.
  *
+ * If 'transaction' was still active, it will first be aborted with
+ * 'kstate_abort_transaction()'.
+ *
+ * * 'transaction' is the transaction to start.
  * * 'state' is the state on which to start the transaction.
- * * 'transaction' is the newly created transaction.
  *
  * Returns 0 if starting the transaction succeeds, or a negative value if it
  * fails. The negative value will be ``-errno``, giving an indication of why
  * the function failed.
  */
-extern int kstate_start_transaction(struct kstate_state        *state,
-                                    struct kstate_transaction **transaction)
+extern int kstate_start_transaction(struct kstate_transaction *transaction,
+                                    struct kstate_state       *state)
 {
   if (state == NULL) {
     fprintf(stderr, "!!! kstate_start_transaction: Cannot start a transaction"
             " on a NULL state\n");
     return -EINVAL;
   }
+  // Remember, unsubscribing from a state unsets its name
+  if (state->name == NULL) {
+    fprintf(stderr, "!!! kstate_start_transaction: Cannot start a transaction"
+            " on an unset state\n");
+    return -EINVAL;
+  }
   print_state(stdout, "Starting transaction on ", state, true);
 
-  struct kstate_transaction *new = malloc(sizeof(*transaction));
-  if (!new) return -ENOMEM;
+  //kstate_abort_transaction(*transaction);
 
   // Take a copy of the information we care about from the state
 
   size_t name_len = strlen(state->name);
-  new->state.name = malloc(name_len + 1);
-  if (!new->state.name) {
-    free(new);
+  transaction->state.name = malloc(name_len + 1);
+  if (!transaction->state.name) {
     return -ENOMEM;
   }
-  strcpy(new->state.name, state->name);
-
-  new->state.permissions = state->permissions;
-
-  *transaction = new;
+  strcpy(transaction->state.name, state->name);
+  transaction->state.permissions = state->permissions;
   return 0;
 }
 
