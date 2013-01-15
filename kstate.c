@@ -124,6 +124,21 @@ extern void print_state(FILE *stream, char *start, struct kstate_state *state, b
 }
 
 /*
+ * Print a representation of 'transaction' on output 'stream'.
+ *
+ * Assumes the transaction is valid.
+ *
+ * If 'start' is non-NULL, print it before the transaction (with no added
+ * whitespace).
+ * If 'eol' is true, then print a newline after the transaction.
+ */
+extern void print_transaction(FILE *stream, char *start,
+                              struct kstate_transaction *transaction, bool eol)
+{
+  print_state(stream, start, &transaction->state, eol);
+}
+
+/*
  * Create a new "empty" state.
  *
  * The normal usage is to create an empty state and then immediately
@@ -218,7 +233,8 @@ extern int kstate_subscribe(struct kstate_state     *state,
  * - ``state`` is the state from which to unsubscribe.
  *
  * After this, the content of the state datastructure will have been
- * unset/freed. Unsubscribing from the same state again will have no effect.
+ * unset/freed. Unsubscribing from this same state value again will have no
+ * effect.
  *
  * Note that transactions using the state keep their own copy of the state
  * information, and are not affected by this function - i.e., the state can
@@ -323,6 +339,78 @@ extern int kstate_start_transaction(struct kstate_transaction *transaction,
   }
   strcpy(transaction->state.name, state->name);
   transaction->state.permissions = state->permissions;
+  return 0;
+}
+
+/*
+ * Abort a transaction.
+ *
+ * - ``transaction`` is the transaction to abort.
+ *
+ * After this, the content of the transaction datastructure will have been
+ * unset/freed. Unsubscribing from this same transaction value again will have
+ * no effect.
+ *
+ * Returns 0 if the abort succeeds, or a negative value if it fails.
+ * The negative value will be ``-errno``, giving an indication of why the
+ * function failed.
+ */
+extern int kstate_abort_transaction(struct kstate_transaction  *transaction)
+{
+  if (transaction == NULL) {     // What did they expect us to do?
+    fprintf(stderr, "!!! kstate_abort_transaction: Cannot abort NULL transaction\n");
+    return -EINVAL;
+  }
+
+  print_transaction(stdout, "Aborting ", transaction, true);
+
+  // Remember that we can always call this function on a previously aborted
+  // transaction structure
+
+  if (transaction->state.name) {
+    free(transaction->state.name);
+    transaction->state.name = NULL;
+  }
+  transaction->state.permissions = 0;
+  return 0;
+}
+
+/*
+ * Commit a transaction.
+ *
+ * - ``transaction`` is the transaction to commit.
+ *
+ * After this, the content of the transaction datastructure will have been
+ * unset/freed.
+ *
+ * It is not allowed to commit a transaction that has not been started.
+ * A transaction that has already been committed or aborted looks as if
+ * it has not been started.
+ *
+ * Returns 0 if the commit succeeds, or a negative value if it fails.
+ * The negative value will be ``-errno``, giving an indication of why the
+ * function failed.
+ */
+extern int kstate_commit_transaction(struct kstate_transaction  *transaction)
+{
+  if (transaction == NULL) {    // What did they expect us to do?
+    fprintf(stderr, "!!! kstate_commit_transaction: Cannot commit NULL transaction\n");
+    return -EINVAL;
+  }
+
+  print_transaction(stdout, "Committing ", transaction, true);
+
+  if (transaction->state.name == NULL) {
+    fprintf(stderr, "!!! kstate_commit_transaction: Cannot commit a transaction"
+            " that has not been started\n");
+    return -EINVAL;
+  }
+
+  if (transaction->state.name) {
+    free(transaction->state.name);
+    transaction->state.name = NULL;
+  }
+  transaction->state.permissions = 0;
   return 0;
 }
 

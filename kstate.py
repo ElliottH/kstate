@@ -122,15 +122,18 @@ class KstateLibrary(object):
 
         self.fn_subscribe = self.lib.kstate_subscribe
         self.fn_subscribe.argtypes = [POINTER(State), c_char_p, c_int]
-        print('subscribe', self.fn_subscribe)
 
         self.fn_unsubscribe = self.lib.kstate_unsubscribe
         self.fn_unsubscribe.argtypes = [POINTER(State)]
-        print('unsubscribe', self.fn_unsubscribe)
 
         self.fn_start_transaction = self.lib.kstate_start_transaction
         self.fn_start_transaction.argtypes = [POINTER(Transaction), POINTER(State)]
-        print('start_transaction', self.fn_start_transaction)
+
+        self.fn_abort_transaction = self.lib.kstate_abort_transaction
+        self.fn_abort_transaction.argtypes = [POINTER(Transaction)]
+
+        self.fn_commit_transaction = self.lib.kstate_commit_transaction
+        self.fn_commit_transaction.argtypes = [POINTER(Transaction)]
 
     def subscribe(self, name, permissions):
         """Subscribe to state 'name' with the given 'permissions'
@@ -158,6 +161,20 @@ class KstateLibrary(object):
         if ret:
             raise Error('Error starting transaction on {}'.format(state), -ret)
         return transaction
+
+    def abort_transaction(self, transaction):
+        """Unsubscribe from this state.
+        """
+        ret = self.fn_abort_transaction(byref(transaction))
+        if ret:
+            raise Error('Error committing transaction on {}'.format(transaction), -ret)
+
+    def commit_transaction(self, transaction):
+        """Unsubscribe from this state.
+        """
+        ret = self.fn_commit_transaction(byref(transaction))
+        if ret:
+            raise Error('Error committing transaction on {}'.format(transaction), -ret)
 
 def expect_success(what, fn, *args, **kwargs):
     print('\n--- Test {0}'.format(what))
@@ -252,10 +269,23 @@ def main(args):
 
     state = expect_success('Subscribing with just READ permission',
                            lib.subscribe, b'Fred.Jim', KSTATE_READ)
-    transaction = expect_success('Starting a transaction on our last state',
+    transaction = expect_success('Starting a transaction on that state',
                                 lib.start_transaction, state)
-    print('Got', transaction)
+    expect_success('Aborting the transaction',
+                   lib.abort_transaction, transaction)
+    expect_success('Aborting the transaction again',
+                   lib.abort_transaction, transaction)
 
+    state = expect_success('Subscribing with just READ permission',
+                           lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    transaction = expect_success('Starting a transaction on that state',
+                                lib.start_transaction, state)
+    expect_success('Committing the transaction',
+                   lib.commit_transaction, transaction)
+    expect_failure('Failing to commit a second time', errno.EINVAL,
+                   lib.commit_transaction, transaction)
+
+    state = State(0,0)
     expect_success('Unsubscribing', lib.unsubscribe, state)
     expect_failure('Failing to start transaction with unsubscribed state', errno.EINVAL,
                    lib.start_transaction, state)
