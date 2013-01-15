@@ -98,6 +98,11 @@ class State(Structure):
     def __str__(self):
         return 'State {0} for {1}'.format(self.name, permission_str(self.permissions))
 
+    def __bool__(self):
+        """We are 'False' if we have no name or permissions.
+        """
+        return bool(self.name and self.permissions)
+
 class Transaction(Structure):
     _fields_ = [('state', State),
                ]
@@ -116,37 +121,45 @@ class KstateLibrary(object):
         self.lib = ctypes.CDLL(self.location)
 
         self.fn_subscribe = self.lib.kstate_subscribe
-        self.fn_subscribe.argtypes = [c_char_p, c_int, POINTER(POINTER(State))]
+        self.fn_subscribe.argtypes = [c_char_p, c_int, POINTER(State)]
         print('subscribe', self.fn_subscribe)
 
         self.fn_unsubscribe = self.lib.kstate_unsubscribe
-        self.fn_unsubscribe.argtypes = [POINTER(POINTER(State))]
+        self.fn_unsubscribe.argtypes = [POINTER(State)]
         print('unsubscribe', self.fn_unsubscribe)
+
+        self.fn_start_transaction = self.lib.kstate_start_transaction
+        self.fn_start_transaction.argtypes = [POINTER(State), POINTER(Transaction)]
+        print('start_transaction', self.fn_start_transaction)
 
     def subscribe(self, name, permissions):
         """Subscribe to state 'name' with the given 'permissions'
 
         The state name must be a byte string (b"xxx").
         """
-        ptr_to_state = POINTER(State)()
-        ret = self.fn_subscribe(name, permissions, byref(ptr_to_state))
+        state = State(0,0)
+        ret = self.fn_subscribe(name, permissions, byref(state))
         if ret:
             raise Error('Error subscribing to %s for %s'%(name,
                         permission_str(permissions)), -ret)
-        state = ptr_to_state[0]
         return state
 
     def unsubscribe(self, state):
         """Unsubscribe from this state.
         """
-        name = state.name
-        permissions = state.permissions
+        self.fn_unsubscribe(byref(state))
 
-        ptr_to_state = pointer(state)
-        ret = self.fn_unsubscribe(byref(ptr_to_state))
+    def start_transaction(self, state):
+        """Start a transaction on state 'name'
+        """
+        if not state:
+            raise GiveUp('Cannot start transaction on {}'.format(state))
+        ptr_to_transaction = POINTER(Transaction)()
+        ret = self.fn_start_transaction(byref(state), byref(ptr_to_transaction))
         if ret:
-            raise Error('Error unsubscribing from %s for %s'%(name,
-                        permission_str(permissions)), -ret)
+            raise Error('Error starting transaction on %s'%(state))
+        transaction = ptr_to_transaction[0]
+        return transaction
 
 def expect_success(what, fn, *args, **kwargs):
     print('\n--- Test {0}'.format(what))
@@ -168,9 +181,18 @@ def expect_failure(what, expected_errno, fn, *args, **kwargs):
         else:
             raise ValueError('xxx Got wrong errno value, expected {0}'.format(expected_errno))
 
+def expect_giveup(what, fn, *args, **kwargs):
+    print('\n--- Test {0}'.format(what))
+    try:
+        val = fn(*args, **kwargs)
+        raise GiveUp('Expected failure, but call of {0} succeeded,'
+                     ' returning {1}'.format(fn.__name__, val))
+    except GiveUp as e:
+        print('Expected failure, and call of {0} failed'
+              ' with:\n  {1}'.format(fn.__name__, e))
+        print('...which was hopefully what we wanted')
+
 def expect_state(state, name, permissions):
-    if not state:
-        raise GiveUp('Expected state {0}, but state is NULL'.format(state))
     if state.name != name:
         raise GiveUp('Expected state with name {0}, but got {1}'.format(name, state))
     if state.permissions != permissions:
@@ -185,8 +207,9 @@ def main(args):
                            lib.subscribe, b'Fred', KSTATE_READ|KSTATE_WRITE)
     expect_state(state, b'Fred', KSTATE_READ|KSTATE_WRITE)
 
-    expect_success('Unsubscribing',
-                   lib.unsubscribe, state)
+    expect_success('Unsubscribing', lib.unsubscribe, state)
+    # Unsubscribing should unset the values in our State
+    expect_state(state, None, 0)
 
     state = expect_success('Subscribing to a name with a "." in it',
                            lib.subscribe, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
@@ -209,6 +232,8 @@ def main(args):
     expect_success('Unsubscribing',
                    lib.unsubscribe, state)
 
+    print('xxx unsubscribed state', state, bool(state))
+
     expect_failure('Failing to subscribe to a zero length name', errno.EINVAL,
                    lib.subscribe, b"", KSTATE_READ)
 
@@ -229,6 +254,16 @@ def main(args):
 
     expect_failure('Failing to subscribe with permission bits 0xF', errno.EINVAL,
                    lib.subscribe, b"Fred", 0xF)
+
+    # Our current 'state' is unsubscribed, so this should fail:
+    expect_giveup('Failing to start transaction with unsubscribed state',
+                  lib.start_transaction, state)
+
+    #state = expect_success('Subscribing with just READ permission',
+    #                       lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    #transaction = expect_success('Starting a transaction on our last state',
+    #                            lib.start_transaction, state)
+    #print('Got', transaction)
 
 
 if __name__ == '__main__':

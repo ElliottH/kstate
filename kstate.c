@@ -115,7 +115,7 @@ extern void print_state(FILE *stream, char *start, struct kstate_state *state, b
   fprintf(stream, "State '%s' for ", state->name);
   if (state->permissions & KSTATE_READ)
     fprintf(stream, "read");
-  if (state->permissions & (KSTATE_READ|KSTATE_WRITE))
+  if ((state->permissions & KSTATE_READ) && (state->permissions & KSTATE_WRITE))
     fprintf(stream, "|");
   if (state->permissions & KSTATE_WRITE)
     fprintf(stream, "write");
@@ -124,13 +124,53 @@ extern void print_state(FILE *stream, char *start, struct kstate_state *state, b
 }
 
 /*
+ * Create a new "empty" state.
+ *
+ * The normal usage is to create an empty state and then immediately
+ * populate it::
+ *
+ *     struct kstate_state *state = kstate_create_state();
+ *     int ret = kstate_subscribe("State.Name", KSTATE_READ, state);
+ *
+ * and then eventually to destroy it:
+ *
+ *     int ret = kstate_unsubscribe(state);
+ *     if (ret) {
+ *       // deal with the error
+ *     }
+ *     kstate_destroy(&state);
+ *
+ * Returns the new state, or NULL if there was insufficient memory.
+ */
+extern struct kstate_state *kstate_create_state()
+{
+  return malloc(sizeof(struct kstate_state));
+}
+
+/*
+ * Destroy a state created with 'kstate_create_state'.
+ *
+ * If a NULL pointer is given, then it is ignored, otherwise the state is
+ * freed and the pointer 'state' is set to NULL.
+ */
+extern void kstate_free_state(struct kstate_state **state)
+{
+  if (*state) {
+    free(*state);
+    *state = NULL;
+  }
+}
+
+/*
  * Subscribe to a state.
+ *
+ * Any data that was previously in 'state' will be removed using
+ * 'kstate_unsubscribe()'.
  *
  * - ``name`` is the name of the state to subscribe to.
  * - ``permissions`` is constructed by OR'ing the permission flags
  *   KSTATE_READ and/or KSTATE_WRITE. At least one of those must be given.
- * - ``state`` is the actual state identifier, as newly constructed by this
- *   function.
+ * - ``state`` is the actual state identifier, as amended by this function.
  *
  * A state name may contain A-Z, a-z, 0-9 and the dot (.) character. It may not
  * start or end with a dot, and may not contain adjacent dots. It must contain
@@ -143,9 +183,9 @@ extern void print_state(FILE *stream, char *start, struct kstate_state *state, b
  * The negative value will be ``-errno``, giving an indication of why the
  * function failed.
  */
-extern int kstate_subscribe(const char               *name,
-                            enum kstate_permissions   permissions,
-                            struct kstate_state     **state)
+extern int kstate_subscribe(const char              *name,
+                            enum kstate_permissions  permissions,
+                            struct kstate_state     *state)
 {
   printf("Subscribing to '%s' for 0x%x\n", name, permissions);
 
@@ -158,19 +198,15 @@ extern int kstate_subscribe(const char               *name,
     return -EINVAL;
   }
 
-  struct kstate_state *new = malloc(sizeof(*state));
-  if (!new) return -ENOMEM;
+  kstate_unsubscribe(state);
 
-  new->name = malloc(name_len + 1);
-  if (!new->name) {
-    free(new);
+  state->name = malloc(name_len + 1);
+  if (!state->name) {
+    free(state);
     return -ENOMEM;
   }
-  strcpy(new->name, name);
-
-  new->permissions = permissions;
-
-  *state = new;
+  strcpy(state->name, name);
+  state->permissions = permissions;
   return 0;
 }
 
@@ -180,7 +216,7 @@ extern int kstate_subscribe(const char               *name,
  * - ``state`` is the state from which to unsubscribe.
  *
  * After this, the content of the state datastructure will have been
- * unset/freed, and ``state`` itself will have been freed.
+ * unset/freed.
  *
  * Note that transactions using the state keep their own copy of the state
  * information, and are not affected by this function - i.e., the state can
@@ -190,21 +226,56 @@ extern int kstate_subscribe(const char               *name,
  * The negative value will be ``-errno``, giving an indication of why the
  * function failed.
  */
-extern int kstate_unsubscribe(struct kstate_state   **state)
+extern void kstate_unsubscribe(struct kstate_state   *state)
 {
-  if (*state) {
-    print_state(stdout, "Unsubscribing from ", *state, true);
+  if (state == NULL)      // What did they expect us to do?
+    return;
 
-    if ((*state)->name) {
-      free((*state)->name);
-      (*state)->name = NULL;
-    }
-    (*state)->permissions = 0;
-    free(*state);
-    *state = NULL;
-  } else {
-    printf("Unsubscribing from NULL state\n");
+  print_state(stdout, "Unsubscribing from ", state, true);
+
+  if (state->name) {
+    free(state->name);
+    state->name = NULL;
   }
+  state->permissions = 0;
+}
+
+/*
+ * Start a new transaction on a state.
+ *
+ * * 'state' is the state on which to start the transaction.
+ * * 'transaction' is the newly created transaction.
+ *
+ * Returns 0 if starting the transaction succeeds, or a negative value if it
+ * fails. The negative value will be ``-errno``, giving an indication of why
+ * the function failed.
+ */
+extern int kstate_start_transaction(struct kstate_state        *state,
+                                    struct kstate_transaction **transaction)
+{
+  if (state == NULL) {
+    fprintf(stderr, "!!! kstate_start_transaction: Cannot start a transaction"
+            " on a NULL state\n");
+    return -EINVAL;
+  }
+  print_state(stdout, "Starting transaction on ", state, true);
+
+  struct kstate_transaction *new = malloc(sizeof(*transaction));
+  if (!new) return -ENOMEM;
+
+  // Take a copy of the information we care about from the state
+
+  size_t name_len = strlen(state->name);
+  new->state.name = malloc(name_len + 1);
+  if (!new->state.name) {
+    free(new);
+    return -ENOMEM;
+  }
+  strcpy(new->state.name, state->name);
+
+  new->state.permissions = state->permissions;
+
+  *transaction = new;
   return 0;
 }
 
