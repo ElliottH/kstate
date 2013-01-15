@@ -19,6 +19,37 @@ THIS_DIR = os.path.split(__file__)[0]
 KSTATE_READ = 1
 KSTATE_WRITE = 2
 
+class GiveUp(Exception):
+    """
+    Use this to indicate that something has gone wrong and we are giving up.
+
+    By default, a return code of 1 is indicated by the 'retcode' value - this
+    can be set by the caller to another value, which __main__.py should then
+    use as its return code if the exception reaches it.
+    """
+
+    # We provide a single attribute, which is used to specify the exit code
+    # to use when a command line handler gets back a GiveUp exception.
+    retcode = 1
+
+    def __init__(self, message=None, retcode=1):
+        self.message = message
+        self.retcode = retcode
+
+    def __str__(self):
+        if self.message is None:
+            return ''
+        else:
+            return self.message
+
+    def __repr__(self):
+        parts = []
+        if self.message is not None:
+            parts.append(repr(self.message))
+        if self.retcode != 1:
+            parts.append('%d'%self.retcode)
+        return 'GiveUp(%s)'%(', '.join(parts))
+
 class Error(Exception):
     """ Use this to report an 'errno' error.
     """
@@ -118,18 +149,36 @@ def main(args):
 
     lib = KstateLibrary()
 
-    print('--- Subscribing to Fred')
-    state = lib.subscribe(b"Fred", KSTATE_READ|KSTATE_WRITE|0x8)
+    print('\n--- Subscribing to Fred')
+    state = lib.subscribe(b"Fred", KSTATE_READ|KSTATE_WRITE)
+    if not state:
+        raise GiveUp('Error subscribing')
 
-    print('--- Unsubscribing to Fred')
+    print('\n--- Unsubscribing to Fred')
     lib.unsubscribe(state)
 
     try:
-        print('--- Failing to subscribe to ""')
+        print('\n--- Failing to subscribe to ""')
         state = lib.subscribe(b"", KSTATE_READ)
+        if state:
+            raise GiveUp('Unexpectedly succeeded in subscribing')
     except Error as e:
         print('Got', e)
-        if e.errno != errno.EINVAL:
+        if e.errno == errno.EINVAL:
+            print('...which was what we wanted')
+        else:
+            raise ValueError('Got wrong errno value')
+
+    try:
+        print('\n--- Failing to subscribe to "Fred" with permission bits 0xF')
+        state = lib.subscribe(b"Fred", 0xF)
+        if state:
+            raise GiveUp('Unexpectedly succeeded in subscribing')
+    except Error as e:
+        print('Got', e)
+        if e.errno == errno.EINVAL:
+            print('...which was what we wanted')
+        else:
             raise ValueError('Got wrong errno value')
 
 

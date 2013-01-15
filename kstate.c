@@ -57,13 +57,22 @@ extern int kstate_subscribe(const char               *name,
                             struct kstate_state     **state)
 {
   printf("Subscribing to '%s' for 0x%x\n", name, permissions);
-  struct kstate_state *new = malloc(sizeof(*state));
-  if (!new) return -ENOMEM;
+
+  if (permissions & ~(KSTATE_READ | KSTATE_WRITE)) {
+    fprintf(stderr, "!!! kstate_subscribe: Unexpected permission bits 0x%x in 0x%x\n",
+            permissions & ~(KSTATE_READ | KSTATE_WRITE),
+            permissions);
+    return -EINVAL;
+  }
 
   size_t name_len = strlen(name);
   if (name_len == 0) {
+    fprintf(stderr, "!!! kstate_subscribe: State name may not be zero length\n");
     return -EINVAL;
   }
+
+  struct kstate_state *new = malloc(sizeof(*state));
+  if (!new) return -ENOMEM;
 
   new->name = malloc(name_len + 1);
   if (!new->name) {
