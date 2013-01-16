@@ -29,7 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <ctype.h>    # for isalnum
+#include <ctype.h>    // for isalnum
 
 #include "kstate.h"
 
