@@ -56,7 +56,14 @@ SHARED_TARGET=$(TGTDIR)/$(SHARED_NAME)
 STATIC_TARGET=$(TGTDIR)/$(STATIC_NAME)
 
 .PHONY: all
-all: dirs $(SHARED_TARGET) $(STATIC_TARGET)
+all: dirs  extract_header $(SHARED_TARGET) $(STATIC_TARGET) test
+
+# Note that this is *not* out-of-tree build friendly
+# On the other hand, it should not do anything if the headers are up-to-date
+# XXX Consider whether to leave this in...
+.PHONY: extract_header
+extract_header:
+	./extract_hdrs.py -kstate
 
 .PHONY: install
 install:
@@ -75,13 +82,27 @@ $(TGTDIR)/%.o: %.c
 
 $(TGTDIR)/%.o: $(DEPS)
 
-
 $(SHARED_TARGET): $(OBJS)
 	echo Objs = $(OBJS)
 	$(LD) $(LD_SHARED_FLAGS) -o $(SHARED_TARGET) $(OBJS) -lc
 
 $(STATIC_TARGET): $(STATIC_TARGET)($(OBJS))
 
+TEST_PROG=$(TGTDIR)/check_kstate
+
+test: $(TEST_PROG)
+	$(TEST_PROG)
+
+# We assume that 'check' has been installed, typically with
+#   sudo apt-get install check
+$(TEST_PROG): check_kstate.c $(STATIC_TARGET)
+	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -o $@ $(WARNING_FLAGS) $^ -lcheck
+
 .PHONY: clean
 clean:
 	rm -f $(TGTDIR)/*.o $(SHARED_TARGET) $(STATIC_TARGET)
+	rm -f $(TEST_PROG)
+
+.PHONY: distclean
+distclean: clean
+	rm -f *.bak

@@ -108,7 +108,10 @@ static bool kstate_permissions_are_bad(uint32_t permissions)
  * If 'start' is non-NULL, print it before the state (with no added whitespace).
  * If 'eol' is true, then print a newline after the state.
  */
-extern void print_state(FILE *stream, char *start, struct kstate_state *state, bool eol)
+extern void kstate_print_state(FILE                 *stream,
+                               char                 *start,
+                               struct kstate_state  *state,
+                               bool                   eol)
 {
   if (start)
     fprintf(stream, "%s", start);
@@ -132,10 +135,12 @@ extern void print_state(FILE *stream, char *start, struct kstate_state *state, b
  * whitespace).
  * If 'eol' is true, then print a newline after the transaction.
  */
-extern void print_transaction(FILE *stream, char *start,
-                              struct kstate_transaction *transaction, bool eol)
+extern void kstate_print_transaction(FILE                       *stream,
+                                     char                       *start,
+                                     struct kstate_transaction  *transaction,
+                                     bool                        eol)
 {
-  print_state(stream, start, &transaction->state, eol);
+  kstate_print_state(stream, start, &transaction->state, eol);
 }
 
 /*
@@ -207,12 +212,12 @@ extern int kstate_subscribe(struct kstate_state     *state,
 {
   printf("Subscribing to '%s' for 0x%x\n", name, permissions);
 
-  if (kstate_permissions_are_bad(permissions)) {
+  size_t name_len = kstate_check_message_name(name);
+  if (name_len == 0) {
     return -EINVAL;
   }
 
-  size_t name_len = kstate_check_message_name(name);
-  if (name_len == 0) {
+  if (kstate_permissions_are_bad(permissions)) {
     return -EINVAL;
   }
 
@@ -249,7 +254,7 @@ extern void kstate_unsubscribe(struct kstate_state   *state)
   if (state == NULL)      // What did they expect us to do?
     return;
 
-  print_state(stdout, "Unsubscribing from ", state, true);
+  kstate_print_state(stdout, "Unsubscribing from ", state, true);
 
   if (state->name) {
     free(state->name);
@@ -326,7 +331,7 @@ extern int kstate_start_transaction(struct kstate_transaction *transaction,
             " on an unset state\n");
     return -EINVAL;
   }
-  print_state(stdout, "Starting transaction on ", state, true);
+  kstate_print_state(stdout, "Starting transaction on ", state, true);
 
   //kstate_abort_transaction(*transaction);
 
@@ -362,7 +367,7 @@ extern int kstate_abort_transaction(struct kstate_transaction  *transaction)
     return -EINVAL;
   }
 
-  print_transaction(stdout, "Aborting ", transaction, true);
+  kstate_print_transaction(stdout, "Aborting ", transaction, true);
 
   // Remember that we can always call this function on a previously aborted
   // transaction structure
@@ -398,7 +403,7 @@ extern int kstate_commit_transaction(struct kstate_transaction  *transaction)
     return -EINVAL;
   }
 
-  print_transaction(stdout, "Committing ", transaction, true);
+  kstate_print_transaction(stdout, "Committing ", transaction, true);
 
   if (transaction->state.name == NULL) {
     fprintf(stderr, "!!! kstate_commit_transaction: Cannot commit a transaction"
