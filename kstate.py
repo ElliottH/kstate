@@ -180,6 +180,7 @@ def expect_success(what, fn, *args, **kwargs):
     print('\n--- Test {0}'.format(what))
     val = fn(*args, **kwargs)
     print('... Call of {0} succeeded, returned {1}'.format(fn.__name__, val))
+    print('--- Test OK')
     return val
 
 def expect_failure(what, expected_errno, fn, *args, **kwargs):
@@ -192,7 +193,7 @@ def expect_failure(what, expected_errno, fn, *args, **kwargs):
         print('Expected failure, and call of {0} failed'
               ' with:\n  {1}'.format(fn.__name__, e))
         if e.errno == expected_errno:
-            print('...which was what we wanted')
+            print('--- Test OK')
         else:
             raise ValueError('xxx Got wrong errno value, expected {0}'.format(expected_errno))
 
@@ -205,7 +206,7 @@ def expect_giveup(what, fn, *args, **kwargs):
     except GiveUp as e:
         print('Expected failure, and call of {0} failed'
               ' with:\n  {1}'.format(fn.__name__, e))
-        print('...which was hopefully what we wanted')
+        print('--- Test OK')
 
 def expect_state(state, name, permissions):
     if state.name != name:
