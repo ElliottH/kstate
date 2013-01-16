@@ -147,7 +147,7 @@ extern void print_transaction(FILE *stream, char *start,
  *     struct kstate_state *state = kstate_create_state();
  *     int ret = kstate_subscribe("State.Name", KSTATE_READ, state);
  *
- * and then eventually to destroy it:
+ * and then eventually to destroy it::
  *
  *     int ret = kstate_unsubscribe(state);
  *     if (ret) {
@@ -267,7 +267,7 @@ extern void kstate_unsubscribe(struct kstate_state   *state)
  *     struct kstate_transaction *transaction = kstate_create_transaction();
  *     int ret = kstate_start_transaction(&transaction, state);
  *
- * and then eventually to destroy it:
+ * and then eventually to destroy it::
  *
  *     int ret = kstate_unsubscribe(transaction);
  *     if (ret) {
