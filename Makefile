@@ -90,13 +90,19 @@ $(STATIC_TARGET): $(STATIC_TARGET)($(OBJS))
 
 TEST_PROG=$(TGTDIR)/check_kstate
 
-test: $(TEST_PROG)
+test: extract_tests $(TEST_PROG)
 	$(TEST_PROG)
 
 # We assume that 'check' has been installed, typically with
 #   sudo apt-get install check
 $(TEST_PROG): check_kstate.c $(STATIC_TARGET)
 	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -o $@ $(WARNING_FLAGS) $^ -lcheck
+
+# For the moment, at least, whilst I'm adding tests, also run
+# extract_tests.py
+.PHONY: extract_tests
+extract_tests:
+	./extract_tests.py check_kstate.c
 
 .PHONY: clean
 clean:

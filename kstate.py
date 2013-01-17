@@ -176,120 +176,157 @@ class KstateLibrary(object):
         if ret:
             raise Error('Error committing transaction on {}'.format(transaction), -ret)
 
-def expect_success(what, fn, *args, **kwargs):
-    print('\n--- Test {0}'.format(what))
-    val = fn(*args, **kwargs)
-    print('... Call of {0} succeeded, returned {1}'.format(fn.__name__, val))
-    print('--- Test OK')
-    return val
+class Tests(object):
+    """No, I'm not desigining a new unit test framework. No.
+    """
 
-def expect_failure(what, expected_errno, fn, *args, **kwargs):
-    print('\n--- Test {0}'.format(what))
-    try:
-        val = fn(*args, **kwargs)
-        raise GiveUp('Expected failure, but call of {0} succeeded,'
-                     ' returning {1}'.format(fn.__name__, val))
-    except Error as e:
-        print('Expected failure, and call of {0} failed'
-              ' with:\n  {1}'.format(fn.__name__, e))
-        if e.errno == expected_errno:
-            print('--- Test OK')
-        else:
-            raise ValueError('xxx Got wrong errno value, expected {0}'.format(expected_errno))
+    def __init__(self):
+        self.succeed = 0
+        self.fail = 0
 
-def expect_giveup(what, fn, *args, **kwargs):
-    print('\n--- Test {0}'.format(what))
-    try:
-        val = fn(*args, **kwargs)
-        raise GiveUp('Expected failure, but call of {0} succeeded,'
-                     ' returning {1}'.format(fn.__name__, val))
-    except GiveUp as e:
-        print('Expected failure, and call of {0} failed'
-              ' with:\n  {1}'.format(fn.__name__, e))
+    def ok(self):
         print('--- Test OK')
+        self.succeed += 1
 
-def expect_state(state, name, permissions):
-    if state.name != name:
-        raise GiveUp('Expected state with name {0}, but got {1}'.format(name, state))
-    if state.permissions != permissions:
-        raise GiveUp('Expected state with permissions {} ({}), but got {}'.format(permissions,
-            permission_str(permissions), state))
+    def report(self):
+        print()
+        print('Number of tests:    ', self.succeed + self.fail)
+        print('Number of successes:', self.succeed)
+        print('Number of failures: ', self.fail)
+        if self.fail == 0 and self.succeed > 0:
+            print('The light is GREEN')
+        else:
+            print('The light is RED')
+
+    def expect_success(self, what, fn, *args, **kwargs):
+        print('\n--- Test {0}'.format(what))
+        try:
+            val = fn(*args, **kwargs)
+            print('... Call of {0} succeeded, returned {1}'.format(fn.__name__, val))
+            self.ok()
+            return val
+        except Exception as e:
+            self.fail += 1
+            raise
+
+    def expect_failure(self, what, expected_errno, fn, *args, **kwargs):
+        print('\n--- Test {0}'.format(what))
+        try:
+            val = fn(*args, **kwargs)
+            self.fail += 1
+            raise GiveUp('Expected failure, but call of {0} succeeded,'
+                         ' returning {1}'.format(fn.__name__, val))
+        except Error as e:
+            print('Expected failure, and call of {0} failed'
+                  ' with:\n  {1}'.format(fn.__name__, e))
+            if e.errno == expected_errno:
+                self.ok()
+            else:
+                self.fail += 1
+                raise ValueError('xxx Got wrong errno value, expected {0}'.format(expected_errno))
+
+    def expect_giveup(self, what, fn, *args, **kwargs):
+        print('\n--- Test {0}'.format(what))
+        try:
+            val = fn(*args, **kwargs)
+            self.fail += 1
+            raise GiveUp('Expected failure, but call of {0} succeeded,'
+                         ' returning {1}'.format(fn.__name__, val))
+        except GiveUp as e:
+            print('Expected failure, and call of {0} failed'
+                  ' with:\n  {1}'.format(fn.__name__, e))
+            self.ok()
+
+    def expect_state(self, state, name, permissions):
+        print('\n--- Test expect state == {} for {} ({})'.format(name,
+            permissions, permission_str(permissions)))
+        if state.name != name:
+            self.fail += 1
+            raise GiveUp('Expected state with name {0}, but got {1}'.format(name, state))
+        if state.permissions != permissions:
+            self.fail += 1
+            raise GiveUp('Expected state with permissions {} ({}), but got {}'.format(permissions,
+                permission_str(permissions), state))
+        self.ok()
 
 def main(args):
 
     lib = KstateLibrary()
+    tests = Tests()
 
-    state = expect_success('Subscribing to a simple name',
-                           lib.subscribe, b'Fred', KSTATE_READ|KSTATE_WRITE)
-    expect_state(state, b'Fred', KSTATE_READ|KSTATE_WRITE)
+    state = tests.expect_success('Subscribing to a simple name',
+                                 lib.subscribe, b'Fred', KSTATE_READ|KSTATE_WRITE)
+    tests.expect_state(state, b'Fred', KSTATE_READ|KSTATE_WRITE)
 
-    expect_success('Unsubscribing', lib.unsubscribe, state)
+    tests.expect_success('Unsubscribing', lib.unsubscribe, state)
     # Unsubscribing should unset the values in our State
-    expect_state(state, None, 0)
+    tests.expect_state(state, None, 0)
 
-    state = expect_success('Subscribing to a name with a "." in it',
-                           lib.subscribe, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
-    expect_state(state, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
+    state = tests.expect_success('Subscribing to a name with a "." in it',
+                                 lib.subscribe, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
+    tests.expect_state(state, b'Fred.Jim', KSTATE_READ|KSTATE_WRITE)
 
-    expect_success('Unsubscribing', lib.unsubscribe, state)
+    tests.expect_success('Unsubscribing', lib.unsubscribe, state)
 
-    state = expect_success('Subscribing with just READ permission',
-                           lib.subscribe, b'Fred.Jim', KSTATE_READ)
-    expect_state(state, b'Fred.Jim', KSTATE_READ)
+    state = tests.expect_success('Subscribing with just READ permission',
+                                 lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    tests.expect_state(state, b'Fred.Jim', KSTATE_READ)
 
-    expect_success('Unsubscribing', lib.unsubscribe, state)
+    tests.expect_success('Unsubscribing', lib.unsubscribe, state)
 
-    state = expect_success('Subscribing with just WRITE permission',
-                           lib.subscribe, b'Fred.Jim', KSTATE_WRITE)
-    expect_state(state, b'Fred.Jim', KSTATE_WRITE)
+    state = tests.expect_success('Subscribing with just WRITE permission',
+                                 lib.subscribe, b'Fred.Jim', KSTATE_WRITE)
+    tests.expect_state(state, b'Fred.Jim', KSTATE_WRITE)
 
-    expect_success('Unsubscribing', lib.unsubscribe, state)
+    tests.expect_success('Unsubscribing', lib.unsubscribe, state)
 
     print('xxx unsubscribed state', state, bool(state))
 
-    expect_failure('Failing to subscribe to a zero length name', errno.EINVAL,
-                   lib.subscribe, b"", KSTATE_READ)
+    tests.expect_failure('Failing to subscribe to a zero length name', errno.EINVAL,
+                         lib.subscribe, b"", KSTATE_READ)
 
-    expect_failure('Failing to subscribe to a name starting with "."', errno.EINVAL,
-                   lib.subscribe, b".Fred", KSTATE_READ)
+    tests.expect_failure('Failing to subscribe to a name starting with "."', errno.EINVAL,
+                         lib.subscribe, b".Fred", KSTATE_READ)
 
-    expect_failure('Failing to subscribe to a name ending with "."', errno.EINVAL,
-                   lib.subscribe, b"Fred.", KSTATE_READ)
+    tests.expect_failure('Failing to subscribe to a name ending with "."', errno.EINVAL,
+                         lib.subscribe, b"Fred.", KSTATE_READ)
 
-    expect_failure('Failing to subscribe to a name with adjacent "."s', errno.EINVAL,
-                   lib.subscribe, b"Fred..Bob", KSTATE_READ)
+    tests.expect_failure('Failing to subscribe to a name with adjacent "."s', errno.EINVAL,
+                         lib.subscribe, b"Fred..Bob", KSTATE_READ)
 
-    expect_failure('Failing to subscribe to a name with non-alphanumerics', errno.EINVAL,
-                   lib.subscribe, b"Fred&Bob", KSTATE_READ)
+    tests.expect_failure('Failing to subscribe to a name with non-alphanumerics', errno.EINVAL,
+                         lib.subscribe, b"Fred&Bob", KSTATE_READ)
 
-    expect_failure('Failing to subscribe with permission bits 0x0', errno.EINVAL,
-                   lib.subscribe, b"Fred", 0x0)
+    tests.expect_failure('Failing to subscribe with permission bits 0x0', errno.EINVAL,
+                         lib.subscribe, b"Fred", 0x0)
 
-    expect_failure('Failing to subscribe with permission bits 0xF', errno.EINVAL,
-                   lib.subscribe, b"Fred", 0xF)
+    tests.expect_failure('Failing to subscribe with permission bits 0xF', errno.EINVAL,
+                         lib.subscribe, b"Fred", 0xF)
 
-    state = expect_success('Subscribing with just READ permission',
-                           lib.subscribe, b'Fred.Jim', KSTATE_READ)
-    transaction = expect_success('Starting a transaction on that state',
-                                lib.start_transaction, state)
-    expect_success('Aborting the transaction',
-                   lib.abort_transaction, transaction)
-    expect_success('Aborting the transaction again',
-                   lib.abort_transaction, transaction)
+    state = tests.expect_success('Subscribing with just READ permission',
+                                 lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    transaction = tests.expect_success('Starting a transaction on that state',
+                                       lib.start_transaction, state)
+    tests.expect_success('Aborting the transaction',
+                         lib.abort_transaction, transaction)
+    tests.expect_success('Aborting the transaction again',
+                         lib.abort_transaction, transaction)
 
-    state = expect_success('Subscribing with just READ permission',
-                           lib.subscribe, b'Fred.Jim', KSTATE_READ)
-    transaction = expect_success('Starting a transaction on that state',
-                                lib.start_transaction, state)
-    expect_success('Committing the transaction',
-                   lib.commit_transaction, transaction)
-    expect_failure('Failing to commit a second time', errno.EINVAL,
-                   lib.commit_transaction, transaction)
+    state = tests.expect_success('Subscribing with just READ permission',
+                                 lib.subscribe, b'Fred.Jim', KSTATE_READ)
+    transaction = tests.expect_success('Starting a transaction on that state',
+                                       lib.start_transaction, state)
+    tests.expect_success('Committing the transaction',
+                         lib.commit_transaction, transaction)
+    tests.expect_failure('Failing to commit a second time', errno.EINVAL,
+                         lib.commit_transaction, transaction)
 
     state = State(0,0)
-    expect_success('Unsubscribing', lib.unsubscribe, state)
-    expect_failure('Failing to start transaction with unsubscribed state', errno.EINVAL,
-                   lib.start_transaction, state)
+    tests.expect_success('Unsubscribing', lib.unsubscribe, state)
+    tests.expect_failure('Failing to start transaction with unsubscribed state', errno.EINVAL,
+                         lib.start_transaction, state)
+
+    tests.report()
 
 
 if __name__ == '__main__':

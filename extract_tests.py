@@ -72,7 +72,7 @@ file_pattern = """\
 )
 """
 
-DEBUG = True
+DEBUG = False
 
 class GiveUp(Exception):
     pass

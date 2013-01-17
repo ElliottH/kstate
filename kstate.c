@@ -115,13 +115,21 @@ extern void kstate_print_state(FILE                 *stream,
 {
   if (start)
     fprintf(stream, "%s", start);
-  fprintf(stream, "State '%s' for ", state->name);
-  if (state->permissions & KSTATE_READ)
-    fprintf(stream, "read");
-  if ((state->permissions & KSTATE_READ) && (state->permissions & KSTATE_WRITE))
-    fprintf(stream, "|");
-  if (state->permissions & KSTATE_WRITE)
-    fprintf(stream, "write");
+  if (state) {
+    fprintf(stream, "State '%s' for ", state->name);
+    if (state->permissions) {
+      if (state->permissions & KSTATE_READ)
+        fprintf(stream, "read");
+      if ((state->permissions & KSTATE_READ) && (state->permissions & KSTATE_WRITE))
+        fprintf(stream, "|");
+      if (state->permissions & KSTATE_WRITE)
+        fprintf(stream, "write");
+    } else {
+      fprintf(stream, "<no permissions>");
+    }
+  } else {
+    fprintf(stream, "State <NULL>");
+  }
   if (eol)
     fprintf(stream, "\n");
 }
@@ -140,7 +148,15 @@ extern void kstate_print_transaction(FILE                       *stream,
                                      struct kstate_transaction  *transaction,
                                      bool                        eol)
 {
-  kstate_print_state(stream, start, &transaction->state, eol);
+  if (start)
+    fprintf(stream, "%s", start);
+  if (transaction) {
+    kstate_print_state(stream, "Transaction on ", &transaction->state, false);
+  } else {
+    fprintf(stream, "Transaction <NULL>");
+  }
+  if (eol)
+    fprintf(stream, "\n");
 }
 
 /*
@@ -158,11 +174,11 @@ extern void kstate_print_transaction(FILE                       *stream,
  *     if (ret) {
  *       // deal with the error
  *     }
- *     kstate_destroy(&state);
+ *     kstate_free_state(&state);
  *
  * Returns the new state, or NULL if there was insufficient memory.
  */
-extern struct kstate_state *kstate_create_state()
+extern struct kstate_state *kstate_create_state(void)
 {
   struct kstate_state *new = malloc(sizeof(struct kstate_state));
   memset(new, 0, sizeof(*new));
@@ -187,9 +203,6 @@ extern void kstate_free_state(struct kstate_state **state)
 /*
  * Subscribe to a state.
  *
- * Any data that was previously in 'state' will be removed using
- * 'kstate_unsubscribe()'.
- *
  * - ``name`` is the name of the state to subscribe to.
  * - ``permissions`` is constructed by OR'ing the permission flags
  *   KSTATE_READ and/or KSTATE_WRITE. At least one of those must be given.
@@ -197,10 +210,10 @@ extern void kstate_free_state(struct kstate_state **state)
  *
  * A state name may contain A-Z, a-z, 0-9 and the dot (.) character. It may not
  * start or end with a dot, and may not contain adjacent dots. It must contain
- * at least one character.
+ * at least one character. Note that the name will be copied into 'state'.
  *
- * If this is the first subscription to the named state, then the state will
- * be created.
+ * If this is the first subscription to the named state, then the shared
+ * data for the state will be created.
  *
  * Returns 0 if the subscription succeeds, or a negative value if it fails.
  * The negative value will be ``-errno``, giving an indication of why the
@@ -210,6 +223,11 @@ extern int kstate_subscribe(struct kstate_state     *state,
                             const char              *name,
                             enum kstate_permissions  permissions)
 {
+  if (state == NULL) {
+    fprintf(stderr, "!!! kstate_subscribe: state argument may not be NULL\n");
+    return -EINVAL;
+  }
+
   printf("Subscribing to '%s' for 0x%x\n", name, permissions);
 
   size_t name_len = kstate_check_message_name(name);
@@ -220,8 +238,6 @@ extern int kstate_subscribe(struct kstate_state     *state,
   if (kstate_permissions_are_bad(permissions)) {
     return -EINVAL;
   }
-
-  kstate_unsubscribe(state);
 
   state->name = malloc(name_len + 1);
   if (!state->name) {
@@ -278,11 +294,11 @@ extern void kstate_unsubscribe(struct kstate_state   *state)
  *     if (ret) {
  *       // deal with the error
  *     }
- *     kstate_destroy(&transaction);
+ *     kstate_free_transaction(&transaction);
  *
  * Returns the new transaction, or NULL if there was insufficient memory.
  */
-extern struct kstate_transaction *kstate_create_transaction()
+extern struct kstate_transaction *kstate_create_transaction(void)
 {
   struct kstate_transaction *new = malloc(sizeof(struct kstate_transaction));
   memset(new, 0, sizeof(*new));
@@ -292,13 +308,15 @@ extern struct kstate_transaction *kstate_create_transaction()
 /*
  * Destroy a transaction created with 'kstate_create_transaction'.
  *
+ * If the transaction is still in progress, it will be aborted.
+ *
  * If a NULL pointer is given, then it is ignored, otherwise the transaction is
  * freed and the pointer 'transaction' is set to NULL.
  */
 extern void kstate_free_transaction(struct kstate_transaction **transaction)
 {
   if (*transaction) {
-    //kstate_abort_transaction(*transaction);
+    kstate_abort_transaction(*transaction);
     free(*transaction);
     *transaction = NULL;
   }
@@ -307,11 +325,13 @@ extern void kstate_free_transaction(struct kstate_transaction **transaction)
 /*
  * Start a new transaction on a state.
  *
- * If 'transaction' was still active, it will first be aborted with
- * 'kstate_abort_transaction()'.
+ * If 'transaction' is still active, this will fail.
  *
  * * 'transaction' is the transaction to start.
  * * 'state' is the state on which to start the transaction.
+ *
+ * Note that a copy of the necessary information from 'state' will be held
+ * in 'transaction'.
  *
  * Returns 0 if starting the transaction succeeds, or a negative value if it
  * fails. The negative value will be ``-errno``, giving an indication of why
@@ -320,6 +340,11 @@ extern void kstate_free_transaction(struct kstate_transaction **transaction)
 extern int kstate_start_transaction(struct kstate_transaction *transaction,
                                     struct kstate_state       *state)
 {
+  if (transaction == NULL) {
+    fprintf(stderr, "!!! kstate_start_transaction: transaction argument may"
+            " not be NULL\n");
+    return -EINVAL;
+  }
   if (state == NULL) {
     fprintf(stderr, "!!! kstate_start_transaction: Cannot start a transaction"
             " on a NULL state\n");
@@ -331,9 +356,8 @@ extern int kstate_start_transaction(struct kstate_transaction *transaction,
             " on an unset state\n");
     return -EINVAL;
   }
-  kstate_print_state(stdout, "Starting transaction on ", state, true);
 
-  //kstate_abort_transaction(*transaction);
+  kstate_print_state(stdout, "Starting transaction on ", state, true);
 
   // Take a copy of the information we care about from the state
 
@@ -353,8 +377,11 @@ extern int kstate_start_transaction(struct kstate_transaction *transaction,
  * - ``transaction`` is the transaction to abort.
  *
  * After this, the content of the transaction datastructure will have been
- * unset/freed. Unsubscribing from this same transaction value again will have
- * no effect.
+ * unset/freed.
+ *
+ * It is not allowed to abort a transaction that has not been started.
+ * A transaction that has already been committed or aborted is equivalent
+ * to a transaction that has not been started.
  *
  * Returns 0 if the abort succeeds, or a negative value if it fails.
  * The negative value will be ``-errno``, giving an indication of why the
@@ -389,8 +416,8 @@ extern int kstate_abort_transaction(struct kstate_transaction  *transaction)
  * unset/freed.
  *
  * It is not allowed to commit a transaction that has not been started.
- * A transaction that has already been committed or aborted looks as if
- * it has not been started.
+ * A transaction that has already been committed or aborted is equivalent
+ * to a transaction that has not been started.
  *
  * Returns 0 if the commit succeeds, or a negative value if it fails.
  * The negative value will be ``-errno``, giving an indication of why the
