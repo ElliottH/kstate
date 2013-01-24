@@ -1,0 +1,28 @@
+Problems with check
+===================
+
+(Mind, I'm very greatful for it! It's still wonderful it (a) exists, and (b)
+uses forking to make it possible to handle segmentation faults, etc, - this is
+a fundamental requirement to my mind. And the list of *good things* about
+check would be a LOT longer.)
+
+1. LGPL, which I'd prefer otherwise. This is a very minor problem, really.
+
+2  Also, really would prefer to be in an autotools environment, which is not
+   what I want to set up.
+
+   This is *very much* the sort of thing the author of a project should
+   decide, and the check author has done so (and since it works on many
+   Unices, it's probably a Good Thing).
+
+3. Doesn't/can't mix test name, test output and test result - I'd like to see
+   them all in one stream.
+
+   (Some of this can be achieved by editing a local version of check.h, but
+   it's not perfect without making more intrusive changes).
+
+4. Many more macros for comparison would be useful.
+
+   Of course, I could write them...
+
+.. vim: set filetype=rst tabstop=8 softtabstop=2 shiftwidth=2 expandtab:

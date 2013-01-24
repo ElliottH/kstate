@@ -41,148 +41,9 @@
 
 #include "kstate.h"
 
-START_TEST(subscribe_with_NULL_name_fails)
+START_TEST(new_and_free_state)
 {
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, NULL, KSTATE_READ);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_zero_permissions_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", 0);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_too_many_permissions_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", 0xF);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_NULL_name_and_zero_permissions_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, NULL, 0);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_zero_length_name_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "", KSTATE_READ);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_dot_at_start_of_name_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, ".Fred", KSTATE_READ);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_dot_at_end_of_name_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred.", KSTATE_READ);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_with_adjacent_dots_in_name_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred..Jim", KSTATE_READ);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-// This is a very basic test of this, but there's not really any point in
-// trying to be exhaustive.
-START_TEST(subscribe_with_non_alphanumeric_in_name_fails)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred&Jim", KSTATE_READ);
-  ck_assert_int_eq(rv, -EINVAL);
-}
-END_TEST
-
-START_TEST(subscribe_for_read_and_unsubscribe)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ);
-  ck_assert_int_eq(rv, 0);
-
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
-}
-END_TEST
-
-START_TEST(subscribe_for_read_and_write_and_unsubscribe)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ|KSTATE_WRITE);
-  ck_assert_int_eq(rv, 0);
-
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
-}
-END_TEST
-
-// XXX At the moment, it is allowed to subscribe for WRITE, although
-// XXX this presumably is shorthand for READ|WRITE. Some decision needs
-// XXX to be made eventually about whether this laziness is good or bad.
-START_TEST(subscribe_for_write_and_unsubscribe)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_WRITE);
-  ck_assert_int_eq(rv, 0);
-
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
-}
-END_TEST
-
-START_TEST(subscribe_with_dot_in_name_and_unsubscribe)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred.Jim", KSTATE_READ);
-  ck_assert_int_eq(rv, 0);
-
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
-}
-END_TEST
-
-// XXX This will stop working if state becomes opaque
-START_TEST(subscribe_and_unsubscribe_checking_state_internals)
-{
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ);
-  ck_assert_int_eq(rv, 0);
-
-  ck_assert_str_eq(state.name, "Fred");
-  ck_assert_int_eq(state.permissions, KSTATE_READ);
-
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
-
-  // Also:
-  fail_unless(state.permissions == 0);
-}
-END_TEST
-
-START_TEST(create_and_free_state)
-{
-  struct kstate_state *state = kstate_create_state();
+  kstate_state_p state = kstate_new_state();
   fail_if(state == NULL);
 
   kstate_free_state(&state);
@@ -190,25 +51,275 @@ START_TEST(create_and_free_state)
 }
 END_TEST
 
-START_TEST(free_NULL_state_fails)
+START_TEST(free_NULL_state)
 {
-  struct kstate_state *state = NULL;
-
+  kstate_state_p state = NULL;
   kstate_free_state(&state);
   fail_unless(state == NULL);
 }
 END_TEST
 
+START_TEST(subscribe_with_NULL_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, NULL, KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_zero_permissions_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", 0);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_too_many_permissions_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", 0xF);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_NULL_name_and_zero_permissions_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, NULL, 0);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_zero_length_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+// 255 characters is too long
+START_TEST(subscribe_with_too_long_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state,
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "12345",
+                            KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+// But we expect 254 to be OK
+START_TEST(subscribe_with_max_length_name_and_unsubscribe)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state,
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234567890" "1234567890" "1234567890" "1234567890" "1234567890"
+                            "1234",
+                            KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_dot_at_start_of_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, ".Fred", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_dot_at_end_of_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred.", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_with_adjacent_dots_in_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred..Jim", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+// This is a very basic test of this, but there's not really any point in
+// trying to be exhaustive.
+START_TEST(subscribe_with_non_alphanumeric_in_name_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred&Jim", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, -EINVAL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_for_read_alone_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred.Read.Only", KSTATE_READ);
+  ck_assert_int_eq(rv, -ENOENT);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_for_read_and_write_and_unsubscribe)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(query_state_name)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  const char *name = kstate_get_state_name(state);
+  ck_assert_str_eq(name, "Fred");
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+
+  name = kstate_get_state_name(state);
+  fail_unless(name == NULL);
+
+  kstate_free_state(&state);
+
+  name = kstate_get_state_name(state);
+  fail_unless(name == NULL);
+}
+END_TEST
+
+// XXX At the moment, it is allowed to subscribe for WRITE, although
+// XXX this is shorthand for READ|WRITE. Some decision needs to be made
+// XXX about whether this laziness is good or bad.
+START_TEST(subscribe_for_write_and_unsubscribe)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(subscribe_for_write_then_read)
+{
+  kstate_state_p state_w = kstate_new_state();
+  int rv = kstate_subscribe(state_w, "Fred", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_state_p state_r = kstate_new_state();
+  rv = kstate_subscribe(state_r, "Fred", KSTATE_READ);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state_w);
+  fail_unless(state_w->name == NULL);
+  kstate_free_state(&state_w);
+
+  kstate_unsubscribe(state_r);
+  fail_unless(state_r->name == NULL);
+  kstate_free_state(&state_r);
+}
+END_TEST
+
+START_TEST(subscribe_for_write_then_read_unsubscribe_other_order)
+{
+  kstate_state_p state_w = kstate_new_state();
+  int rv = kstate_subscribe(state_w, "Fred", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_state_p state_r = kstate_new_state();
+  rv = kstate_subscribe(state_r, "Fred", KSTATE_READ);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state_r);
+  fail_unless(state_r->name == NULL);
+  kstate_free_state(&state_r);
+
+  kstate_unsubscribe(state_w);
+  fail_unless(state_w->name == NULL);
+  kstate_free_state(&state_w);
+}
+END_TEST
+
+START_TEST(subscribe_with_dot_in_name_and_unsubscribe)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred.Jim", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+  kstate_free_state(&state);
+}
+END_TEST
+
+// XXX This will stop working if state becomes opaque
+START_TEST(subscribe_and_unsubscribe_checking_state_internals)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  // Note the extra leading '/' - this may be a good reason for making the
+  // structure opaque
+  ck_assert_str_eq(state->name, "/Fred");
+  ck_assert_int_eq(state->permissions, KSTATE_READ|KSTATE_WRITE);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+
+  // Also:
+  fail_unless(state->permissions == 0);
+  kstate_free_state(&state);
+}
+END_TEST
+
 START_TEST(subscribe_with_NULL_state_fails)
 {
-  int rv = kstate_subscribe(NULL, "Fred", KSTATE_READ);
+  int rv = kstate_subscribe(NULL, "Fred", KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, -EINVAL);
 }
 END_TEST
 
 START_TEST(create_and_free_transaction)
 {
-  struct kstate_transaction *transaction = kstate_create_transaction();
+  kstate_transaction_p transaction = kstate_new_transaction();
   fail_if(transaction == NULL);
 
   kstate_free_transaction(&transaction);
@@ -216,9 +327,9 @@ START_TEST(create_and_free_transaction)
 }
 END_TEST
 
-START_TEST(free_NULL_transaction_fails)
+START_TEST(free_NULL_transaction)
 {
-  struct kstate_transaction *transaction = NULL;
+  kstate_transaction_p transaction = NULL;
 
   kstate_free_transaction(&transaction);
   fail_unless(transaction == NULL);
@@ -227,7 +338,7 @@ END_TEST
 
 START_TEST(start_transaction_with_NULL_transaction_fails)
 {
-  struct kstate_state *state = kstate_create_state();
+  kstate_state_p state = kstate_new_state();
   fail_if(state == NULL);
 
   int rv = kstate_start_transaction(NULL, state);
@@ -237,9 +348,9 @@ END_TEST
 
 START_TEST(start_transaction_with_NULL_state_fails)
 {
-  struct kstate_state *state = NULL;
+  kstate_state_p state = NULL;
 
-  struct kstate_transaction *transaction = kstate_create_transaction();
+  kstate_transaction_p transaction = kstate_new_transaction();
   fail_if(transaction == NULL);
 
   int rv = kstate_start_transaction(transaction, state);
@@ -247,96 +358,121 @@ START_TEST(start_transaction_with_NULL_state_fails)
 }
 END_TEST
 
-START_TEST(start_transaction_with_all_zero_state_fails)
+START_TEST(start_transaction_with_unset_state_fails)
 {
-  struct kstate_state state = {0};
+  kstate_state_p state = kstate_new_state();
 
-  struct kstate_transaction *transaction = kstate_create_transaction();
+  kstate_transaction_p transaction = kstate_new_transaction();
   fail_if(transaction == NULL);
 
-  int rv = kstate_start_transaction(transaction, &state);
+  int rv = kstate_start_transaction(transaction, state);
   ck_assert_int_eq(rv, -EINVAL);
 }
 END_TEST
 
 START_TEST(sensible_transaction_aborted)
 {
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
-  struct kstate_transaction transaction;
-  rv = kstate_start_transaction(&transaction, &state);
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state);
   ck_assert_int_eq(rv, 0);
 
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
 
-  rv = kstate_abort_transaction(&transaction);
+  rv = kstate_abort_transaction(transaction);
   ck_assert_int_eq(rv, 0);
-  fail_unless(transaction.state.name == NULL);
+  fail_unless(transaction->state.name == NULL);
 }
 END_TEST
 
 START_TEST(sensible_transaction_committed)
 {
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
-  struct kstate_transaction transaction;
-  rv = kstate_start_transaction(&transaction, &state);
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state);
   ck_assert_int_eq(rv, 0);
 
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
 
-  rv = kstate_commit_transaction(&transaction);
+  rv = kstate_commit_transaction(transaction);
   ck_assert_int_eq(rv, 0);
-  fail_unless(transaction.state.name == NULL);
+  fail_unless(transaction->state.name == NULL);
 }
 END_TEST
 
-START_TEST(abort_transaction_twice_succeeds)
+START_TEST(query_transaction_state_name)
 {
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
-  struct kstate_transaction transaction;
-  rv = kstate_start_transaction(&transaction, &state);
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state);
   ck_assert_int_eq(rv, 0);
 
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
+  const char *name = kstate_get_transaction_state_name(transaction);
+  ck_assert_str_eq(name, "Fred");
 
-  rv = kstate_abort_transaction(&transaction);
+  rv = kstate_abort_transaction(transaction);
   ck_assert_int_eq(rv, 0);
-  fail_unless(transaction.state.name == NULL);
+  fail_unless(transaction->state.name == NULL);
 
-  rv = kstate_abort_transaction(&transaction);
+  name = kstate_get_transaction_state_name(transaction);
+  fail_unless(name == NULL);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+}
+END_TEST
+
+START_TEST(abort_transaction_twice_fails)
+{
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
+
+  rv = kstate_abort_transaction(transaction);
+  ck_assert_int_eq(rv, 0);
+  fail_unless(transaction->state.name == NULL);
+
+  rv = kstate_abort_transaction(transaction);
+  ck_assert_int_eq(rv, -EINVAL);
 }
 END_TEST
 
 START_TEST(commit_transaction_twice_fails)
 {
-  struct kstate_state state;
-  int rv = kstate_subscribe(&state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
-  struct kstate_transaction transaction;
-  rv = kstate_start_transaction(&transaction, &state);
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state);
   ck_assert_int_eq(rv, 0);
 
-  kstate_unsubscribe(&state);
-  fail_unless(state.name == NULL);
+  kstate_unsubscribe(state);
+  fail_unless(state->name == NULL);
 
-  rv = kstate_commit_transaction(&transaction);
+  rv = kstate_commit_transaction(transaction);
   ck_assert_int_eq(rv, 0);
-  fail_unless(transaction.state.name == NULL);
+  fail_unless(transaction->state.name == NULL);
 
-  rv = kstate_commit_transaction(&transaction);
+  rv = kstate_commit_transaction(transaction);
   ck_assert_int_eq(rv, -EINVAL);
 }
 END_TEST
@@ -350,31 +486,37 @@ Suite *test_kstate_suite(void)
   // 'extract_tests.py' script. This helps avoid having to fix compiler
   // warnings when I forget to include a new test in the list.
   // START TESTS
+  tcase_add_test(tc_core, new_and_free_state);
+  tcase_add_test(tc_core, free_NULL_state);
   tcase_add_test(tc_core, subscribe_with_NULL_name_fails);
   tcase_add_test(tc_core, subscribe_with_zero_permissions_fails);
   tcase_add_test(tc_core, subscribe_with_too_many_permissions_fails);
   tcase_add_test(tc_core, subscribe_with_NULL_name_and_zero_permissions_fails);
   tcase_add_test(tc_core, subscribe_with_zero_length_name_fails);
+  tcase_add_test(tc_core, subscribe_with_too_long_name_fails);
+  tcase_add_test(tc_core, subscribe_with_max_length_name_and_unsubscribe);
   tcase_add_test(tc_core, subscribe_with_dot_at_start_of_name_fails);
   tcase_add_test(tc_core, subscribe_with_dot_at_end_of_name_fails);
   tcase_add_test(tc_core, subscribe_with_adjacent_dots_in_name_fails);
   tcase_add_test(tc_core, subscribe_with_non_alphanumeric_in_name_fails);
-  tcase_add_test(tc_core, subscribe_for_read_and_unsubscribe);
+  tcase_add_test(tc_core, subscribe_for_read_alone_fails);
   tcase_add_test(tc_core, subscribe_for_read_and_write_and_unsubscribe);
+  tcase_add_test(tc_core, query_state_name);
   tcase_add_test(tc_core, subscribe_for_write_and_unsubscribe);
+  tcase_add_test(tc_core, subscribe_for_write_then_read);
+  tcase_add_test(tc_core, subscribe_for_write_then_read_unsubscribe_other_order);
   tcase_add_test(tc_core, subscribe_with_dot_in_name_and_unsubscribe);
   tcase_add_test(tc_core, subscribe_and_unsubscribe_checking_state_internals);
-  tcase_add_test(tc_core, create_and_free_state);
-  tcase_add_test(tc_core, free_NULL_state_fails);
   tcase_add_test(tc_core, subscribe_with_NULL_state_fails);
   tcase_add_test(tc_core, create_and_free_transaction);
-  tcase_add_test(tc_core, free_NULL_transaction_fails);
+  tcase_add_test(tc_core, free_NULL_transaction);
   tcase_add_test(tc_core, start_transaction_with_NULL_transaction_fails);
   tcase_add_test(tc_core, start_transaction_with_NULL_state_fails);
-  tcase_add_test(tc_core, start_transaction_with_all_zero_state_fails);
+  tcase_add_test(tc_core, start_transaction_with_unset_state_fails);
   tcase_add_test(tc_core, sensible_transaction_aborted);
   tcase_add_test(tc_core, sensible_transaction_committed);
-  tcase_add_test(tc_core, abort_transaction_twice_succeeds);
+  tcase_add_test(tc_core, query_transaction_state_name);
+  tcase_add_test(tc_core, abort_transaction_twice_fails);
   tcase_add_test(tc_core, commit_transaction_twice_fails);
   // END TESTS
   suite_add_tcase(s, tc_core);
