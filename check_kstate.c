@@ -38,6 +38,7 @@
 
 #include <check.h>
 #include <errno.h>
+#include <stdlib.h>
 
 #include "kstate.h"
 
@@ -189,10 +190,12 @@ START_TEST(subscribe_for_read_alone_fails)
 }
 END_TEST
 
-START_TEST(subscribe_for_read_and_write_and_unsubscribe_and_free)
+START_TEST(subscribe_for_readwrite_and_unsubscribe_and_free)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_unsubscribe(state);
@@ -202,10 +205,12 @@ START_TEST(subscribe_for_read_and_write_and_unsubscribe_and_free)
 }
 END_TEST
 
-START_TEST(subscribe_for_read_and_write_and_free)
+START_TEST(subscribe_for_readwrite_and_free)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_free_state(&state);
@@ -215,12 +220,15 @@ END_TEST
 
 START_TEST(query_state_name)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
   const char *name = kstate_get_state_name(state);
-  ck_assert_str_eq(name, "Fred");
+  ck_assert_str_eq(state_name, name);
+
+  free(state_name);
 
   kstate_unsubscribe(state);
   fail_if(kstate_state_is_subscribed(state));
@@ -237,8 +245,10 @@ END_TEST
 
 START_TEST(query_state_permissions)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   uint32_t permissions = kstate_get_state_permissions(state);
@@ -261,8 +271,10 @@ END_TEST
 // XXX about whether this laziness is good or bad.
 START_TEST(subscribe_for_write_and_unsubscribe)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_unsubscribe(state);
@@ -272,31 +284,61 @@ END_TEST
 
 START_TEST(subscribe_for_write_then_for_read)
 {
+  char *state_name = kstate_get_unique_name("Fred");
+
   kstate_state_p state_w = kstate_new_state();
-  int rv = kstate_subscribe(state_w, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state_w, state_name, KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
   kstate_state_p state_r = kstate_new_state();
-  rv = kstate_subscribe(state_r, "Fred", KSTATE_READ);
+  rv = kstate_subscribe(state_r, state_name, KSTATE_READ);
   ck_assert_int_eq(rv, 0);
+
+  free(state_name);
 
   kstate_unsubscribe(state_w);
   kstate_free_state(&state_w);
 
   kstate_unsubscribe(state_r);
   kstate_free_state(&state_r);
+}
+END_TEST
+
+START_TEST(subscribe_for_write_then_for_write)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+
+  kstate_state_p state_w1 = kstate_new_state();
+  int rv = kstate_subscribe(state_w1, state_name, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_state_p state_w2 = kstate_new_state();
+  rv = kstate_subscribe(state_w2, state_name, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  free(state_name);
+
+  kstate_unsubscribe(state_w1);
+  kstate_free_state(&state_w1);
+
+  kstate_unsubscribe(state_w2);
+  kstate_free_state(&state_w2);
 }
 END_TEST
 
 START_TEST(subscribe_for_write_then_for_read_unsubscribe_other_order)
 {
+  char *state_name = kstate_get_unique_name("Fred");
+
   kstate_state_p state_w = kstate_new_state();
-  int rv = kstate_subscribe(state_w, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state_w, state_name, KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
   kstate_state_p state_r = kstate_new_state();
-  rv = kstate_subscribe(state_r, "Fred", KSTATE_READ);
+  rv = kstate_subscribe(state_r, state_name, KSTATE_READ);
   ck_assert_int_eq(rv, 0);
+
+  free(state_name);
 
   kstate_unsubscribe(state_r);
   kstate_free_state(&state_r);
@@ -306,20 +348,11 @@ START_TEST(subscribe_for_write_then_for_read_unsubscribe_other_order)
 }
 END_TEST
 
-START_TEST(subscribe_with_dot_in_name_and_unsubscribe)
-{
-  kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred.Jim", KSTATE_READ|KSTATE_WRITE);
-  ck_assert_int_eq(rv, 0);
-
-  kstate_unsubscribe(state);
-  kstate_free_state(&state);
-}
-END_TEST
-
 START_TEST(subscribe_with_NULL_state_fails)
 {
-  int rv = kstate_subscribe(NULL, "Fred", KSTATE_READ|KSTATE_WRITE);
+  char *state_name = kstate_get_unique_name("Fred");
+  int rv = kstate_subscribe(NULL, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, -EINVAL);
 }
 END_TEST
@@ -379,8 +412,10 @@ END_TEST
 
 START_TEST(sensible_transaction_aborted)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -401,8 +436,10 @@ END_TEST
 
 START_TEST(sensible_transaction_committed)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -423,8 +460,10 @@ END_TEST
 
 START_TEST(free_transaction_also_aborts)  // or, at least, doesn't fall over
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -441,8 +480,10 @@ END_TEST
 
 START_TEST(query_transaction_state_name)
 {
+  char *state_name = kstate_get_unique_name("Fred");
+
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -450,7 +491,9 @@ START_TEST(query_transaction_state_name)
   ck_assert_int_eq(rv, 0);
 
   const char *name = kstate_get_transaction_state_name(transaction);
-  ck_assert_str_eq(name, "Fred");
+  ck_assert_str_eq(name, state_name);
+
+  free(state_name);
 
   rv = kstate_abort_transaction(transaction);
   ck_assert_int_eq(rv, 0);
@@ -471,8 +514,10 @@ END_TEST
 
 START_TEST(query_transaction_state_permissions)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -500,8 +545,10 @@ END_TEST
 
 START_TEST(abort_transaction_twice_fails)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -524,8 +571,10 @@ END_TEST
 
 START_TEST(commit_transaction_twice_fails)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -584,8 +633,10 @@ END_TEST
 
 START_TEST(abort_freed_transaction_fails)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -604,8 +655,10 @@ END_TEST
 
 START_TEST(commit_freed_transaction_fails)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -627,8 +680,10 @@ END_TEST
 // A transaction takes a copy of the state
 START_TEST(transaction_aborted_after_state_freed)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -649,8 +704,10 @@ END_TEST
 // A transaction takes a copy of the state
 START_TEST(transaction_committed_after_state_freed)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction = kstate_new_transaction();
@@ -670,8 +727,10 @@ END_TEST
 
 START_TEST(nested_transactions_same_state_commit_commit)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction1 = kstate_new_transaction();
@@ -700,8 +759,10 @@ END_TEST
 
 START_TEST(nested_transactions_same_state_commit_abort)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction1 = kstate_new_transaction();
@@ -730,8 +791,10 @@ END_TEST
 
 START_TEST(nested_transactions_same_state_abort_commit)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction1 = kstate_new_transaction();
@@ -760,8 +823,10 @@ END_TEST
 
 START_TEST(interleaved_transactions_same_state_commit_commit)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction1 = kstate_new_transaction();
@@ -790,8 +855,10 @@ END_TEST
 
 START_TEST(interleaved_transactions_same_state_commit_abort)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction1 = kstate_new_transaction();
@@ -820,8 +887,10 @@ END_TEST
 
 START_TEST(interleaved_transactions_same_state_abort_commit)
 {
+  char *state_name = kstate_get_unique_name("Fred");
   kstate_state_p state = kstate_new_state();
-  int rv = kstate_subscribe(state, "Fred", KSTATE_READ|KSTATE_WRITE);
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
   ck_assert_int_eq(rv, 0);
 
   kstate_transaction_p transaction1 = kstate_new_transaction();
@@ -871,14 +940,14 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, subscribe_with_adjacent_dots_in_name_fails);
   tcase_add_test(tc_core, subscribe_with_non_alphanumeric_in_name_fails);
   tcase_add_test(tc_core, subscribe_for_read_alone_fails);
-  tcase_add_test(tc_core, subscribe_for_read_and_write_and_unsubscribe_and_free);
-  tcase_add_test(tc_core, subscribe_for_read_and_write_and_free);
+  tcase_add_test(tc_core, subscribe_for_readwrite_and_unsubscribe_and_free);
+  tcase_add_test(tc_core, subscribe_for_readwrite_and_free);
   tcase_add_test(tc_core, query_state_name);
   tcase_add_test(tc_core, query_state_permissions);
   tcase_add_test(tc_core, subscribe_for_write_and_unsubscribe);
   tcase_add_test(tc_core, subscribe_for_write_then_for_read);
+  tcase_add_test(tc_core, subscribe_for_write_then_for_write);
   tcase_add_test(tc_core, subscribe_for_write_then_for_read_unsubscribe_other_order);
-  tcase_add_test(tc_core, subscribe_with_dot_in_name_and_unsubscribe);
   tcase_add_test(tc_core, subscribe_with_NULL_state_fails);
   tcase_add_test(tc_core, create_and_free_transaction);
   tcase_add_test(tc_core, free_NULL_transaction);

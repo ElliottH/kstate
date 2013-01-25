@@ -30,6 +30,11 @@
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>    // for isalnum
+#include <time.h>     // for strftime
+#include <sys/time.h> // for gettimeofday
+
+#include <sys/types.h>
+#include <unistd.h>
 
 // For shm_open and friends
 #include <sys/mman.h>
@@ -58,7 +63,7 @@ struct kstate_transaction {
  *
  * Returns the name length if it's OK, 0 if it's naughty
  */
-static int kstate_check_message_name(const char *name)
+static int kstate_check_name(const char *name)
 {
   size_t ii;
   int dot_at = 1;
@@ -105,6 +110,75 @@ static int kstate_check_message_name(const char *name)
     }
   }
   return name_len;
+}
+
+static int num_digits(int value)
+{
+  int count = 0;
+  do
+  {
+    ++count;
+    value /= 10;
+  }
+  while (value);
+  return count;
+}
+
+/*
+ * Return a unique valid state name starting with prefix.
+ *
+ * The name is composed of:
+ *
+ * * the prefix string
+ * * the number of microseconds since the epoch
+ * * our process id
+ * * a statically increasing integer
+ *
+ * separated by dots. Thus it is only as "unique" as afforded by the
+ * accuracy of gettimeofday - i.e., it relies on the apparent time
+ * thus reported having changed.
+ *
+ * For most purposes, this should be sufficient.
+ *
+ * The caller is responsible for freeing the returned string.
+ *
+ * Returns NULL if it is not possible to make such a name with the given
+ * prefix.
+ */
+extern char *kstate_get_unique_name(const char *prefix)
+{
+  static uint32_t extra = 0;
+
+  if (prefix == NULL) {
+    fprintf(stderr, "!!! kstate_get_unique_name: Prefix may not be NULL\n");
+    return NULL;
+  }
+
+  size_t prefix_len = strlen(prefix);
+
+  struct timeval tv;
+  int rv = gettimeofday(&tv, NULL);
+  if (rv) {
+    fprintf(stderr, "!!! kstate_get_unique_name: Error getting time-of-day: %d %s\n",
+            errno, strerror(errno));
+    return NULL;
+  }
+
+  pid_t pid = getpid();
+
+  char *name = malloc(prefix_len + 1 +
+                      num_digits(tv.tv_sec) + 6 + 1 +
+                      num_digits(pid) + 1 + num_digits(extra) + 1);
+  if (name == NULL) return NULL;
+  sprintf(name, "%s.%ld%06ld.%u.%u", prefix, tv.tv_sec, tv.tv_usec, (uint32_t) pid, extra);
+
+  ++extra;
+
+  if (!kstate_check_name(name)) {
+    return NULL;
+  }
+
+  return name;
 }
 
 /*
@@ -366,8 +440,8 @@ extern int kstate_subscribe(kstate_state_p         state,
   print_state(stdout, name, permissions, -99);
   printf("\n");
 
-  size_t name_len = kstate_check_message_name(name);
-  if (name_len == 0 || name_len > KSTATE_MAX_NAME_LEN) {
+  size_t name_len = kstate_check_name(name);
+  if (name_len == 0) {
     return -EINVAL;
   }
 
