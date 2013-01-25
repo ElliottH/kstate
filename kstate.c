@@ -150,6 +150,31 @@ extern const char *kstate_get_transaction_state_name(kstate_transaction_p transa
 }
 
 /*
+ * Return a state's permissions, or 0 if it is not subscribed.
+ */
+extern uint32_t kstate_get_state_permissions(kstate_state_p state)
+{
+  if (state && state->name) {
+    // We ignore the leading '/' character, which the user did not specify
+    return state->permissions;
+  } else {
+    return 0;
+  }
+}
+
+/*
+ * Return a transaction's state permissions, or 0 if it is not active.
+ */
+extern uint32_t kstate_get_transaction_state_permissions(kstate_transaction_p transaction)
+{
+  if (transaction && transaction->state.name) {
+    return transaction->state.permissions;
+  } else {
+    return 0;
+  }
+}
+
+/*
  * Print a representation of 'state' on output 'stream'.
  *
  * Assumes the state is valid.
@@ -325,6 +350,10 @@ extern int kstate_subscribe(kstate_state_p         state,
   if (permissions & KSTATE_WRITE) {
     oflag = O_RDWR | O_CREAT;
     // XXX Allow everyone any access, at least for the moment
+    // XXX It is possible that we will want another version of this function
+    // XXX which allows specifying the mode (the "normal" version of the
+    // XXX function should always be the one that defaults to a "sensible"
+    // XXX mode, whatever we decide that to be).
     mode = S_IRWXU | S_IRWXG | S_IRWXO;
   } else {
     // We always allow read

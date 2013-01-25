@@ -25,4 +25,13 @@ check would be a LOT longer.)
 
    Of course, I could write them...
 
+5. Needing the START_TEST/END_TEST macros/markers, rather than some sort of
+   "discovery" of tests.
+
+   (although this is ameliorated by the fact that the compiler will complain
+   if a test is not used, in the normal manner for unused functions)
+
+   Contrariwise, though, there is no need for a convention on how test
+   functions must be named.
+
 .. vim: set filetype=rst tabstop=8 softtabstop=2 shiftwidth=2 expandtab:
