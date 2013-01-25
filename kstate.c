@@ -74,6 +74,15 @@ static int kstate_check_message_name(const char *name)
     fprintf(stderr, "!!! kstate_subscribe: State name may not be zero length\n");
     return 0;
   }
+  if (name_len > KSTATE_MAX_NAME_LEN) {
+    // Would it be more helpful to give all the characters?
+    // Is anyone reading this?
+    fprintf(stderr, "!!! kstate_subscribe: State name '%.5s..%s' is %u"
+            " characters long, but the maximum length is %d characters\n",
+            name, &name[name_len-5],
+            (unsigned) name_len, KSTATE_MAX_NAME_LEN);
+    return 0;
+  }
 
   if (name[0] == '.' || name[name_len-1] == '.') {
     fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not start or"
@@ -187,6 +196,30 @@ extern uint32_t kstate_get_transaction_state_permissions(kstate_transaction_p tr
   }
 }
 
+// Note that if shm_fd is < -1, then it will not be mentioned
+static void print_state(FILE       *stream,
+                        const char *name,
+                        uint32_t    permissions,
+                        int         shm_fd)
+{
+  fprintf(stream, "State '%s' for ", name);
+  if (permissions) {
+    if (permissions & KSTATE_READ)
+      fprintf(stream, "read");
+    if ((permissions & KSTATE_READ) && (permissions & KSTATE_WRITE))
+      fprintf(stream, "|");
+    if (permissions & KSTATE_WRITE)
+      fprintf(stream, "write");
+  } else {
+    fprintf(stream, "<no permissions>");
+  }
+  if (shm_fd == -1) {
+    fprintf(stream, " <not open>");
+  } else if (shm_fd > 0) {
+    fprintf(stream, " fd %d", shm_fd);
+  }
+}
+
 /*
  * Print a representation of 'state' on output 'stream'.
  *
@@ -196,7 +229,7 @@ extern uint32_t kstate_get_transaction_state_permissions(kstate_transaction_p tr
  * If 'eol' is true, then print a newline after the state.
  */
 extern void kstate_print_state(FILE           *stream,
-                               char           *start,
+                               const char     *start,
                                kstate_state_p  state,
                                bool            eol)
 {
@@ -204,22 +237,10 @@ extern void kstate_print_state(FILE           *stream,
     fprintf(stream, "%s", start);
 
   if (kstate_state_is_subscribed(state)) {
-    fprintf(stream, "State '%s' for ", state->name + 1); // ignore the leading '/'
-    if (state->permissions) {
-      if (state->permissions & KSTATE_READ)
-        fprintf(stream, "read");
-      if ((state->permissions & KSTATE_READ) && (state->permissions & KSTATE_WRITE))
-        fprintf(stream, "|");
-      if (state->permissions & KSTATE_WRITE)
-        fprintf(stream, "write");
-    } else {
-      fprintf(stream, "<no permissions>");
-    }
-    if (state->shm_fd == -1) {
-      fprintf(stream, " <not open>");
-    } else {
-      fprintf(stream, " fd %d", state->shm_fd);
-    }
+    print_state(stream,
+                state->name+1,      // ignore the leading '/'
+                state->permissions,
+                state->shm_fd);
   } else {
     fprintf(stream, "State <unsubscribed>");
   }
@@ -238,7 +259,7 @@ extern void kstate_print_state(FILE           *stream,
  * If 'eol' is true, then print a newline after the transaction.
  */
 extern void kstate_print_transaction(FILE                 *stream,
-                                     char                 *start,
+                                     const char           *start,
                                      kstate_transaction_p  transaction,
                                      bool                  eol)
 {
@@ -298,7 +319,9 @@ extern kstate_state_p kstate_new_state(void)
 extern void kstate_free_state(kstate_state_p *state)
 {
   if (state && *state) {
-    kstate_unsubscribe(*state);
+    if (kstate_state_is_subscribed(*state)) {
+      kstate_unsubscribe(*state);
+    }
     struct kstate_state *s = (struct kstate_state *)(*state);
     free(s);
     *state = NULL;
@@ -339,7 +362,9 @@ extern int kstate_subscribe(kstate_state_p         state,
     return -EINVAL;
   }
 
-  printf("Subscribing to '%s' for 0x%x\n", name, permissions);
+  printf("Subscribing to ");
+  print_state(stdout, name, permissions, -99);
+  printf("\n");
 
   size_t name_len = kstate_check_message_name(name);
   if (name_len == 0 || name_len > KSTATE_MAX_NAME_LEN) {
@@ -453,7 +478,9 @@ extern struct kstate_transaction *kstate_new_transaction(void)
 extern void kstate_free_transaction(kstate_transaction_p *transaction)
 {
   if (transaction && *transaction) {
-    kstate_abort_transaction(*transaction);
+    if (kstate_transaction_is_active(*transaction)) {
+      kstate_abort_transaction(*transaction);
+    }
     struct kstate_transaction *t = (struct kstate_transaction *)(*transaction);
     free(t);
     *transaction = NULL;
@@ -500,7 +527,7 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
     return -EINVAL;
   }
 
-  kstate_print_state(stdout, "Starting transaction on ", state, true);
+  kstate_print_state(stdout, "Starting Transaction on ", state, true);
 
   // Take a copy of the information we care about from the state
 
