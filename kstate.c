@@ -38,6 +38,19 @@
 
 #include "kstate.h"
 
+struct kstate_state {
+  char        *name;
+  uint32_t     permissions;
+
+  int          shm_fd;    // The file id we get back from shm_open
+};
+
+
+struct kstate_transaction {
+  struct kstate_state       state;
+
+};
+
 /*
  * Given a message name, is it valid?
  *
