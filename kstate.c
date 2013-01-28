@@ -44,16 +44,21 @@
 #include "kstate.h"
 
 struct kstate_state {
-  char        *name;
-  uint32_t     permissions;
+  char      *name;        // The name of our shared memory object
+  uint32_t   permissions; // Our idea of its permissions
 
-  int          shm_fd;    // The file id we get back from shm_open
+  int        shm_fd;      // The file id we get back from shm_open
+  void      *map_addr;    // The shared memory associated with it
+  size_t     map_length;  // and how much shared memory there is
 };
 
 
 struct kstate_transaction {
-  struct kstate_state       state;
+  char      *name;        // The name of our shared memory object
+  uint32_t   permissions; // Our idea of its permissions
 
+  void      *map_addr;    // The shared memory associated with it
+  size_t     map_length;  // and how much shared memory there is
 };
 
 /*
@@ -206,8 +211,7 @@ static bool kstate_permissions_are_bad(uint32_t permissions)
  */
 extern bool kstate_state_is_subscribed(kstate_state_p state)
 {
-  // The detail of this is bound to change
-  return state != NULL && state->name != NULL;
+  return state != NULL && state->name;
 }
 
 /*
@@ -216,7 +220,7 @@ extern bool kstate_state_is_subscribed(kstate_state_p state)
 extern bool kstate_transaction_is_active(kstate_transaction_p transaction)
 {
   // The detail of this is bound to change
-  return (transaction != NULL) && (transaction->state.name != NULL);
+  return transaction != NULL && transaction->name;
 }
 
 /*
@@ -224,7 +228,7 @@ extern bool kstate_transaction_is_active(kstate_transaction_p transaction)
  */
 extern const char *kstate_get_state_name(kstate_state_p state)
 {
-  if (state && state->name) {
+  if (kstate_state_is_subscribed(state)) {
     // We ignore the leading '/' character, which the user did not specify
     return &state->name[1];
   } else {
@@ -237,9 +241,9 @@ extern const char *kstate_get_state_name(kstate_state_p state)
  */
 extern const char *kstate_get_transaction_state_name(kstate_transaction_p transaction)
 {
-  if (transaction && transaction->state.name) {
+  if (kstate_transaction_is_active(transaction)) {
     // We ignore the leading '/' character, which the user did not specify
-    return &transaction->state.name[1];
+    return &transaction->name[1];
   } else {
     return NULL;
   }
@@ -250,8 +254,7 @@ extern const char *kstate_get_transaction_state_name(kstate_transaction_p transa
  */
 extern uint32_t kstate_get_state_permissions(kstate_state_p state)
 {
-  if (state && state->name) {
-    // We ignore the leading '/' character, which the user did not specify
+  if (kstate_state_is_subscribed(state)) {
     return state->permissions;
   } else {
     return 0;
@@ -263,8 +266,8 @@ extern uint32_t kstate_get_state_permissions(kstate_state_p state)
  */
 extern uint32_t kstate_get_transaction_state_permissions(kstate_transaction_p transaction)
 {
-  if (transaction && transaction->state.name) {
-    return transaction->state.permissions;
+  if (kstate_transaction_is_active(transaction)) {
+    return transaction->permissions;
   } else {
     return 0;
   }
@@ -288,9 +291,9 @@ static void print_state(FILE       *stream,
     fprintf(stream, "<no permissions>");
   }
   if (shm_fd == -1) {
-    fprintf(stream, " <not open>");
+    fprintf(stream, " on <no fd>");
   } else if (shm_fd > 0) {
-    fprintf(stream, " fd %d", shm_fd);
+    fprintf(stream, " on fd %d", shm_fd);
   }
 }
 
@@ -323,6 +326,24 @@ extern void kstate_print_state(FILE           *stream,
     fprintf(stream, "\n");
 }
 
+static void print_transaction(FILE       *stream,
+                              const char *name,
+                              uint32_t    permissions)
+{
+  fprintf(stream, "Transaction for ");
+  if (permissions) {
+    if (permissions & KSTATE_READ)
+      fprintf(stream, "read");
+    if ((permissions & KSTATE_READ) && (permissions & KSTATE_WRITE))
+      fprintf(stream, "|");
+    if (permissions & KSTATE_WRITE)
+      fprintf(stream, "write");
+  } else {
+    fprintf(stream, "<no permissions>");
+  }
+  fprintf(stream, " on '%s'", name);
+}
+
 /*
  * Print a representation of 'transaction' on output 'stream'.
  *
@@ -339,11 +360,15 @@ extern void kstate_print_transaction(FILE                 *stream,
 {
   if (start)
     fprintf(stream, "%s", start);
+
   if (kstate_transaction_is_active(transaction)) {
-    kstate_print_state(stream, "Transaction on ", &transaction->state, false);
+    print_transaction(stream,
+                      transaction->name+1,      // ignore the leading '/'
+                      transaction->permissions);
   } else {
     fprintf(stream, "Transaction <not active>");
   }
+
   if (eol)
     fprintf(stream, "\n");
 }
@@ -352,8 +377,6 @@ extern void kstate_print_transaction(FILE                 *stream,
 // XXX Also add get_ptr, get_name and get_permissions functions for state_p
 // XXX Also add get_state function for transaction_p ???
 // XXX Also add comparison function for state_p and transaction_p
-// XXX Then move the definition of the two structures into this file,
-// XXX so they are opaque in the header file.
 
 /*
  * Create a new "empty" state.
@@ -385,7 +408,7 @@ extern kstate_state_p kstate_new_state(void)
 }
 
 /*
- * Destroy a state created with 'kstate_new_state'.
+ * Free a state created with 'kstate_new_state'.
  *
  * If a NULL pointer is given, then it is ignored, otherwise the state is
  * freed and the pointer is set to NULL.
@@ -450,15 +473,15 @@ extern int kstate_subscribe(kstate_state_p         state,
   }
 
   state->name = malloc(name_len + 1 + 1);
-  if (!state->name) {
-    return -ENOMEM;
-  }
+  if (!state->name) return -ENOMEM;
+
   state->name[0] = '/';
   strcpy(state->name + 1, name);
   state->permissions = permissions;
 
   int oflag = 0;
   mode_t mode = 0;
+  bool creating = false;
   if (permissions & KSTATE_WRITE) {
     oflag = O_RDWR | O_CREAT;
     // XXX Allow everyone any access, at least for the moment
@@ -467,6 +490,7 @@ extern int kstate_subscribe(kstate_state_p         state,
     // XXX function should always be the one that defaults to a "sensible"
     // XXX mode, whatever we decide that to be).
     mode = S_IRWXU | S_IRWXG | S_IRWXO;
+    creating = true;
   } else {
     // We always allow read
     oflag = O_RDONLY;
@@ -475,11 +499,62 @@ extern int kstate_subscribe(kstate_state_p         state,
   state->shm_fd = shm_open(state->name, oflag, mode);
   if (state->shm_fd < 0) {
     int rv = errno;
+    fprintf(stderr, "!!! kstate_subscribe: Error in shm_open(\"%s\", 0x%x, 0x%x): %d %s\n",
+            state->name, oflag, mode, rv, strerror(rv));
     free(state->name);
     state->name = NULL;
     state->permissions = 0;
     return -rv;
   }
+
+  long page_size = sysconf(_SC_PAGESIZE);
+
+  // If we're creating the shared memory object, we need to set a size,
+  // or it will be zero sized.
+  // For the moment, we always set the same size, one page.
+  if (creating) {
+    // Caveat emptor - from the man page:
+    //
+    //    If the file previously was larger than this size, the extra data is
+    //    lost. If  the file  previously was  shorter, it is extended, and the
+    //    extended part reads as null bytes ('\0').
+    //
+    int rv = ftruncate(state->shm_fd, page_size);
+    if (rv) {
+      int rv = errno;
+      kstate_print_state(stderr, "!!! kstate_subscribe:"
+                         " Error in setting shared memory size for ", state, false);
+      fprintf(stderr, " to 0x%x: %d %s\n", (uint32_t)page_size, rv, strerror(rv));
+      free(state->name);
+      state->name = NULL;
+      state->permissions = 0;
+      // NB: we're not doing shm_unlink...
+      return -rv;
+    }
+  }
+
+  // Some defaults just for now...
+  int prot = PROT_READ;
+  int flags = MAP_SHARED;
+
+  // Again, by default map the whole available area, starting at the
+  // start of the "file".
+  state->map_length = page_size;
+  state->map_addr = mmap(NULL, state->map_length, prot, flags, state->shm_fd, 0);
+  if (state->map_addr == MAP_FAILED) {
+    int rv = errno;
+    kstate_print_state(stderr, "!!! kstate_subscribe:"
+                       " Error in mapping shared memory for ", state, false);
+    fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+    free(state->name);
+    state->name = NULL;
+    state->permissions = 0;
+    state->map_addr = 0;
+    state->map_length = 0;
+    // NB: we're not doing shm_unlink...
+    return -rv;
+  }
+
   return 0;
 }
 
@@ -507,10 +582,24 @@ extern void kstate_unsubscribe(kstate_state_p  state)
 
   kstate_print_state(stdout, "Unsubscribing from ", state, true);
 
+  if (state->map_addr != 0 && state->map_addr != MAP_FAILED) {
+    int rv = munmap(state->map_addr, state->map_length);
+    if (rv) {
+      rv = errno;
+      kstate_print_state(stderr, "!!! kstate_unsubscribe:"
+                         " Error in freeing shared memory for ", state, false);
+      fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+      // But there's not much we can do about it...
+    }
+    state->map_addr = 0;
+    state->map_length = 0;
+  }
+
   if (state->name) {
     free(state->name);
     state->name = NULL;
   }
+
   state->permissions = 0;
 }
 
@@ -537,7 +626,6 @@ extern struct kstate_transaction *kstate_new_transaction(void)
 {
   struct kstate_transaction *new = malloc(sizeof(struct kstate_transaction));
   memset(new, 0, sizeof(*new));
-  new->state.shm_fd = -1;
   return new;
 }
 
@@ -569,8 +657,12 @@ extern void kstate_free_transaction(kstate_transaction_p *transaction)
  * * 'transaction' is the transaction to start.
  * * 'state' is the state on which to start the transaction.
  *
- * Note that a copy of the necessary information from 'state' will be held
- * in 'transaction'.
+ * Note that copy of the state will be taken, so that the transaction
+ * can continue to access the state's shared memory even if the particular
+ * 'state' is unsubscribed. However, this is not enough information to
+ * reconstruct/return the entirety of the original 'state', as we do not
+ * (for instance) remember the shared memory object used internally as an
+ * intermediary when creating a state.
  *
  * Returns 0 if starting the transaction succeeds, or a negative value if it
  * fails. The negative value will be ``-errno``, giving an indication of why
@@ -595,24 +687,67 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
     return -EINVAL;
   }
   // Remember, unsubscribing from a state unsets its name
-  if (state->name == NULL) {
+  if (!kstate_state_is_subscribed(state)) {
     fprintf(stderr, "!!! kstate_start_transaction: Cannot start a transaction"
-            " on an unset state\n");
+            " on an unsubscribed state\n");
     return -EINVAL;
   }
 
   kstate_print_state(stdout, "Starting Transaction on ", state, true);
 
-  // Take a copy of the information we care about from the state
-
   size_t name_len = strlen(state->name);
-  transaction->state.name = malloc(name_len + 1);
-  if (!transaction->state.name) {
-    return -ENOMEM;
+  transaction->name = malloc(name_len + 1);
+  if (transaction->name == NULL) return -ENOMEM;
+
+  strcpy(transaction->name, state->name);
+  transaction->permissions = state->permissions;
+  transaction->map_length = state->map_length;
+
+  // Some defaults just for now...
+  int prot = PROT_READ | PROT_WRITE;
+  int flags = MAP_SHARED;
+
+  transaction->map_addr = mmap(NULL, transaction->map_length, prot, flags, state->shm_fd, 0);
+  if (transaction->map_addr == MAP_FAILED) {
+    int rv = errno;
+    kstate_print_state(stderr, "!!! kstate_start_transaction:"
+                       " Error in mapping shared memory for Transaction on ", state, false);
+    fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+    free(transaction->name);
+    transaction->name = NULL;
+    transaction->permissions = 0;
+    transaction->map_addr = 0;
+    transaction->map_length = 0;
+    return -rv;
   }
-  strcpy(transaction->state.name, state->name);
-  transaction->state.permissions = state->permissions;
-  transaction->state.shm_fd = state->shm_fd;
+
+  kstate_print_transaction(stdout, "Started ", transaction, true);
+
+  return 0;
+}
+
+static int finish_transaction(char *caller,
+                              kstate_transaction_p  transaction)
+{
+  if (transaction->map_addr != 0 && transaction->map_addr != MAP_FAILED) {
+    int rv = munmap(transaction->map_addr, transaction->map_length);
+    if (rv) {
+      rv = errno;
+      fprintf(stderr, "!!! %s: ", caller);
+      kstate_print_transaction(stderr, " Error in freeing shared memory for ", transaction, false);
+      fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+      return -rv;
+    }
+    transaction->map_addr = 0;
+    transaction->map_length = 0;
+  }
+
+  if (transaction->name) {
+    free(transaction->name);
+    transaction->name = NULL;
+  }
+
+  transaction->permissions = 0;
   return 0;
 }
 
@@ -646,15 +781,8 @@ extern int kstate_abort_transaction(kstate_transaction_p  transaction)
 
   kstate_print_transaction(stdout, "Aborting ", transaction, true);
 
-  // Remember that we can always call this function on a previously aborted
-  // transaction structure
-
-  if (transaction->state.name) {
-    free(transaction->state.name);
-    transaction->state.name = NULL;
-  }
-  transaction->state.permissions = 0;
-  return 0;
+  int rv = finish_transaction("kstate_abort_transaction", transaction);
+  return rv;
 }
 
 /*
@@ -687,18 +815,8 @@ extern int kstate_commit_transaction(struct kstate_transaction  *transaction)
 
   kstate_print_transaction(stdout, "Committing ", transaction, true);
 
-  if (transaction->state.name == NULL) {
-    fprintf(stderr, "!!! kstate_commit_transaction: Cannot commit a transaction"
-            " that has not been started\n");
-    return -EINVAL;
-  }
-
-  if (transaction->state.name) {
-    free(transaction->state.name);
-    transaction->state.name = NULL;
-  }
-  transaction->state.permissions = 0;
-  return 0;
+  int rv = finish_transaction("kstate_commit_transaction", transaction);
+  return rv;
 }
 
 // vim: set tabstop=8 softtabstop=2 shiftwidth=2 expandtab:
