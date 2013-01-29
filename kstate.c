@@ -285,6 +285,22 @@ extern uint32_t kstate_get_transaction_permissions(kstate_transaction_p transact
   }
 }
 
+/*
+ * Return a transaction's id, or 0 if it is not active.
+ *
+ * We do not say anything about the value of the id, except that 0 means the
+ * transaction is not active, the same transaction always has the same id, and
+ * two separate transactions have distinct ids.
+ */
+extern uint32_t kstate_get_transaction_id(kstate_transaction_p transaction)
+{
+  if (kstate_transaction_is_active(transaction)) {
+    return transaction->id;
+  } else {
+    return 0;
+  }
+}
+
 // Note that if shm_fd is < -1, then it will not be mentioned
 static void print_state(FILE       *stream,
                         const char *name,
@@ -650,7 +666,7 @@ extern void kstate_unsubscribe(kstate_state_p  state)
  */
 extern struct kstate_transaction *kstate_new_transaction(void)
 {
-  static uint32_t next_transaction_id = 0;
+  static uint32_t next_transaction_id = 1;    // because 0 is reserved
 
   struct kstate_transaction *new = malloc(sizeof(struct kstate_transaction));
   memset(new, 0, sizeof(*new));
