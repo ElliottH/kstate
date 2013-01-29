@@ -579,6 +579,36 @@ START_TEST(sensible_transaction_committed)
 }
 END_TEST
 
+START_TEST(commit_readonly_transaction_fails)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state, KSTATE_READ);
+  ck_assert_int_eq(rv, 0);
+
+  // Commit fails
+  rv = kstate_commit_transaction(transaction);
+  ck_assert_int_eq(rv, -EPERM);
+  fail_unless(kstate_transaction_is_active(transaction));
+
+  // But we can always abort
+  rv = kstate_abort_transaction(transaction);
+  ck_assert_int_eq(rv, 0);
+  fail_if(kstate_transaction_is_active(transaction));
+
+  kstate_free_transaction(&transaction);
+  fail_unless(transaction == NULL);
+
+  kstate_unsubscribe(state);
+  kstate_free_state(&state);
+}
+END_TEST
+
 START_TEST(free_transaction_also_aborts)  // or, at least, doesn't fall over
 {
   char *state_name = kstate_get_unique_name("Fred");
@@ -1122,6 +1152,7 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, start_write_only_transaction_is_actually_readwrite);
   tcase_add_test(tc_core, sensible_transaction_aborted);
   tcase_add_test(tc_core, sensible_transaction_committed);
+  tcase_add_test(tc_core, commit_readonly_transaction_fails);
   tcase_add_test(tc_core, free_transaction_also_aborts);
   tcase_add_test(tc_core, query_transaction_state_name);
   tcase_add_test(tc_core, query_transaction_state_permissions);

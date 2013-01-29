@@ -671,6 +671,11 @@ extern struct kstate_transaction *kstate_new_transaction(void)
   struct kstate_transaction *new = malloc(sizeof(struct kstate_transaction));
   memset(new, 0, sizeof(*new));
   new->id = next_transaction_id++;
+
+  // Oh, OK, we should probably check.
+  if (next_transaction_id == 0)
+    next_transaction_id = 1;
+
   return new;
 }
 
@@ -878,6 +883,12 @@ extern int kstate_commit_transaction(struct kstate_transaction  *transaction)
     fprintf(stderr, "!!! kstate_commit_transaction: transaction is not active\n");
     kstate_print_transaction(stderr, "!!! ", transaction, true);
     return -EINVAL;
+  }
+
+  if (!(transaction->permissions & KSTATE_WRITE)) {
+    fprintf(stderr, "!!! kstate_commit_transaction: Cannot commit a read-only transaction\n");
+    kstate_print_transaction(stderr, "!!! ", transaction, true);
+    return -EPERM;
   }
 
   kstate_print_transaction(stdout, "Committing ", transaction, true);
