@@ -876,6 +876,40 @@ START_TEST(transaction_committed_after_state_freed)
 }
 END_TEST
 
+START_TEST(states_can_be_distinguished)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+
+  kstate_state_p state1 = kstate_new_state();
+  int rv = kstate_subscribe_state(state1, state_name, KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_state_p state2 = kstate_new_state();
+  rv = kstate_subscribe_state(state2, state_name, KSTATE_READ|KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  free(state_name);
+
+  uint32_t id1 = kstate_get_state_id(state1);
+  ck_assert_int_ne(id1, 0);
+  uint32_t id2 = kstate_get_state_id(state2);
+  ck_assert_int_ne(id2, 0);
+
+  ck_assert_int_ne(id1, id2);
+
+  ck_assert_int_eq(id1, kstate_get_state_id(state1));
+  ck_assert_int_eq(id2, kstate_get_state_id(state2));
+
+  kstate_free_state(&state1);
+  kstate_free_state(&state2);
+
+  id1 = kstate_get_state_id(state1);
+  ck_assert_int_eq(id1, 0);
+  id2 = kstate_get_state_id(state2);
+  ck_assert_int_eq(id2, 0);
+}
+END_TEST
+
 START_TEST(transactions_can_be_distinguished)
 {
   char *state_name = kstate_get_unique_name("Fred");
@@ -1166,6 +1200,7 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, commit_freed_transaction_fails);
   tcase_add_test(tc_core, transaction_aborted_after_state_freed);
   tcase_add_test(tc_core, transaction_committed_after_state_freed);
+  tcase_add_test(tc_core, states_can_be_distinguished);
   tcase_add_test(tc_core, transactions_can_be_distinguished);
   tcase_add_test(tc_core, nested_transactions_same_state_commit_commit);
   tcase_add_test(tc_core, nested_transactions_same_state_commit_abort);
