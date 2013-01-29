@@ -76,20 +76,20 @@ static int kstate_check_name(const char *name)
   int dot_at = 1;
 
   if (name == NULL) {
-    fprintf(stderr, "!!! kstate_subscribe: State name may not be NULL\n");
+    fprintf(stderr, "!!! kstate_subscribe_state: State name may not be NULL\n");
     return 0;
   }
 
   size_t name_len = strlen(name);
 
   if (name_len == 0) {
-    fprintf(stderr, "!!! kstate_subscribe: State name may not be zero length\n");
+    fprintf(stderr, "!!! kstate_subscribe_state: State name may not be zero length\n");
     return 0;
   }
   if (name_len > KSTATE_MAX_NAME_LEN) {
     // Would it be more helpful to give all the characters?
     // Is anyone reading this?
-    fprintf(stderr, "!!! kstate_subscribe: State name '%.5s..%s' is %u"
+    fprintf(stderr, "!!! kstate_subscribe_state: State name '%.5s..%s' is %u"
             " characters long, but the maximum length is %d characters\n",
             name, &name[name_len-5],
             (unsigned) name_len, KSTATE_MAX_NAME_LEN);
@@ -97,7 +97,7 @@ static int kstate_check_name(const char *name)
   }
 
   if (name[0] == '.' || name[name_len-1] == '.') {
-    fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not start or"
+    fprintf(stderr, "!!! kstate_subscribe_state: State name '%s' may not start or"
             " end with '.'\n", name);
     return 0;
   }
@@ -105,13 +105,13 @@ static int kstate_check_name(const char *name)
   for (ii = 0; ii < name_len; ii++) {
     if (name[ii] == '.') {
       if (dot_at == ii - 1) {
-        fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not have"
+        fprintf(stderr, "!!! kstate_subscribe_state: State name '%s' may not have"
                 " adjacent '.'s\n", name);
         return 0;
       }
       dot_at = ii;
     } else if (!isalnum(name[ii])) {
-      fprintf(stderr, "!!! kstate_subscribe: State name '%s' may not"
+      fprintf(stderr, "!!! kstate_subscribe_state: State name '%s' may not"
               " contain '%c' (not alphanumeric)\n", name, name[ii]);
       return 0;
     }
@@ -191,11 +191,11 @@ extern char *kstate_get_unique_name(const char *prefix)
 static bool state_permissions_are_bad(uint32_t permissions)
 {
   if (!permissions) {
-    fprintf(stderr, "!!! kstate_subscribe: Unset permissions bits (0x0) not allowed\n");
+    fprintf(stderr, "!!! kstate_subscribe_state: Unset permissions bits (0x0) not allowed\n");
     return true;
   }
   else if (permissions & ~(KSTATE_READ | KSTATE_WRITE)) {
-    fprintf(stderr, "!!! kstate_subscribe: Unexpected permission bits 0x%x in 0x%x\n",
+    fprintf(stderr, "!!! kstate_subscribe_state: Unexpected permission bits 0x%x in 0x%x\n",
             permissions & ~(KSTATE_READ | KSTATE_WRITE),
             permissions);
     return true;
@@ -415,11 +415,11 @@ extern void kstate_print_transaction(FILE                 *stream,
  * populate it::
  *
  *     kstate_state_p state = kstate_new_state();
- *     int ret = kstate_subscribe("State.Name", KSTATE_READ|KSTATE_WRITE, state);
+ *     int ret = kstate_subscribe_state("State.Name", KSTATE_READ|KSTATE_WRITE, state);
  *
  * and then eventually to destroy it::
  *
- *     int ret = kstate_unsubscribe(state);
+ *     int ret = kstate_unsubscribe_state(state);
  *     if (ret) {
  *       // deal with the error
  *     }
@@ -447,7 +447,7 @@ extern void kstate_free_state(kstate_state_p *state)
 {
   if (state && *state) {
     if (kstate_state_is_subscribed(*state)) {
-      kstate_unsubscribe(*state);
+      kstate_unsubscribe_state(*state);
     }
     struct kstate_state *s = (struct kstate_state *)(*state);
     free(s);
@@ -479,17 +479,17 @@ extern void kstate_free_state(kstate_state_p *state)
  * The negative value will be ``-errno``, giving an indication of why the
  * function failed.
  */
-extern int kstate_subscribe(kstate_state_p         state,
-                            const char            *name,
-                            kstate_permissions_t   permissions)
+extern int kstate_subscribe_state(kstate_state_p         state,
+                                  const char            *name,
+                                  kstate_permissions_t   permissions)
 {
   if (state == NULL) {
-    fprintf(stderr, "!!! kstate_subscribe: state argument may not be NULL\n");
+    fprintf(stderr, "!!! kstate_subscribe_state: state argument may not be NULL\n");
     return -EINVAL;
   }
 
   if (kstate_state_is_subscribed(state)) {
-    fprintf(stderr, "!!! kstate_subscribe: state is still subscribeed\n");
+    fprintf(stderr, "!!! kstate_subscribe_state: state is still subscribeed\n");
     kstate_print_state(stderr, "!!! ", state, true);
     return -EINVAL;
   }
@@ -541,7 +541,8 @@ extern int kstate_subscribe(kstate_state_p         state,
   state->shm_fd = shm_open(state->name, oflag, mode);
   if (state->shm_fd < 0) {
     int rv = errno;
-    fprintf(stderr, "!!! kstate_subscribe: Error in shm_open(\"%s\", 0x%x, 0x%x): %d %s\n",
+    fprintf(stderr, "!!! kstate_subscribe_state:"
+            " Error in shm_open(\"%s\", 0x%x, 0x%x): %d %s\n",
             state->name, oflag, mode, rv, strerror(rv));
     free(state->name);
     state->name = NULL;
@@ -564,7 +565,7 @@ extern int kstate_subscribe(kstate_state_p         state,
     int rv = ftruncate(state->shm_fd, page_size);
     if (rv) {
       int rv = errno;
-      kstate_print_state(stderr, "!!! kstate_subscribe:"
+      kstate_print_state(stderr, "!!! kstate_subscribe_state:"
                          " Error in setting shared memory size for ", state, false);
       fprintf(stderr, " to 0x%x: %d %s\n", (uint32_t)page_size, rv, strerror(rv));
       free(state->name);
@@ -585,7 +586,7 @@ extern int kstate_subscribe(kstate_state_p         state,
   state->map_addr = mmap(NULL, state->map_length, prot, flags, state->shm_fd, 0);
   if (state->map_addr == MAP_FAILED) {
     int rv = errno;
-    kstate_print_state(stderr, "!!! kstate_subscribe:"
+    kstate_print_state(stderr, "!!! kstate_subscribe_state:"
                        " Error in mapping shared memory for ", state, false);
     fprintf(stderr, ": %d %s\n", rv, strerror(rv));
     free(state->name);
@@ -617,7 +618,7 @@ extern int kstate_subscribe(kstate_state_p         state,
  * The negative value will be ``-errno``, giving an indication of why the
  * function failed.
  */
-extern void kstate_unsubscribe(kstate_state_p  state)
+extern void kstate_unsubscribe_state(kstate_state_p  state)
 {
   if (state == NULL)      // What did they expect us to do?
     return;
@@ -628,7 +629,7 @@ extern void kstate_unsubscribe(kstate_state_p  state)
     int rv = munmap(state->map_addr, state->map_length);
     if (rv) {
       rv = errno;
-      kstate_print_state(stderr, "!!! kstate_unsubscribe:"
+      kstate_print_state(stderr, "!!! kstate_unsubscribe_state:"
                          " Error in freeing shared memory for ", state, false);
       fprintf(stderr, ": %d %s\n", rv, strerror(rv));
       // But there's not much we can do about it...
@@ -656,7 +657,7 @@ extern void kstate_unsubscribe(kstate_state_p  state)
  *
  * and then eventually to destroy it::
  *
- *     int ret = kstate_unsubscribe(transaction);
+ *     int ret = kstate_unsubscribe_state(transaction);
  *     if (ret) {
  *       // deal with the error
  *     }
@@ -868,6 +869,9 @@ extern int kstate_abort_transaction(kstate_transaction_p  transaction)
  * It is not allowed to commit a transaction that has not been started.
  * In other words, you cannot commit a transaction before it has been started,
  * or after it has been aborted or committed.
+ *
+ * It is also not allowed to commit a read-only transaction (such must be
+ * aborted).
  *
  * Returns 0 if the commit succeeds, or a negative value if it fails.
  * The negative value will be ``-errno``, giving an indication of why the
