@@ -64,62 +64,6 @@ struct kstate_transaction {
   size_t     map_length;  // and how much shared memory there is
 };
 
-/*
- * Given a message name, is it valid?
- *
- * We have nothing to say on maximum length.
- *
- * Returns the name length if it's OK, 0 if it's naughty
- */
-static int kstate_check_name(const char *name)
-{
-  size_t ii;
-  int dot_at = 1;
-
-  if (name == NULL) {
-    fprintf(stderr, "!!! kstate_subscribe_state: State name may not be NULL\n");
-    return 0;
-  }
-
-  size_t name_len = strlen(name);
-
-  if (name_len == 0) {
-    fprintf(stderr, "!!! kstate_subscribe_state: State name may not be zero length\n");
-    return 0;
-  }
-  if (name_len > KSTATE_MAX_NAME_LEN) {
-    // Would it be more helpful to give all the characters?
-    // Is anyone reading this?
-    fprintf(stderr, "!!! kstate_subscribe_state: State name '%.5s..%s' is %u"
-            " characters long, but the maximum length is %d characters\n",
-            name, &name[name_len-5],
-            (unsigned) name_len, KSTATE_MAX_NAME_LEN);
-    return 0;
-  }
-
-  if (name[0] == '.' || name[name_len-1] == '.') {
-    fprintf(stderr, "!!! kstate_subscribe_state: State name '%s' may not start or"
-            " end with '.'\n", name);
-    return 0;
-  }
-
-  for (ii = 0; ii < name_len; ii++) {
-    if (name[ii] == '.') {
-      if (dot_at == ii - 1) {
-        fprintf(stderr, "!!! kstate_subscribe_state: State name '%s' may not have"
-                " adjacent '.'s\n", name);
-        return 0;
-      }
-      dot_at = ii;
-    } else if (!isalnum(name[ii])) {
-      fprintf(stderr, "!!! kstate_subscribe_state: State name '%s' may not"
-              " contain '%c' (not alphanumeric)\n", name, name[ii]);
-      return 0;
-    }
-  }
-  return name_len;
-}
-
 static int num_digits(int value)
 {
   int count = 0;
@@ -133,10 +77,91 @@ static int num_digits(int value)
 }
 
 /*
+ * Given a state name, is it valid?
+ *
+ * Returns the name length if it's OK, 0 if it's naughty
+ */
+static size_t check_state_name(const char *caller, const char *name)
+{
+  size_t ii;
+  int dot_at = 1;
+
+  if (name == NULL) {
+    fprintf(stderr, "!!! %s: State name may not be NULL\n", caller);
+    return 0;
+  }
+
+  size_t name_len = strlen(name);
+
+  if (name_len == 0) {
+    fprintf(stderr, "!!! %s: State name may not be zero length\n", caller);
+    return 0;
+  }
+  if (name_len > KSTATE_MAX_NAME_LEN) {
+    // Would it be more helpful to give all the characters?
+    // Is anyone reading this?
+    fprintf(stderr, "!!! %s: State name '%.5s..%s' is %u"
+            " characters long, but the maximum length is %d characters\n",
+            caller, name, &name[name_len-5],
+            (unsigned) name_len, KSTATE_MAX_NAME_LEN);
+    return 0;
+  }
+
+  if (name[0] == '.' || name[name_len-1] == '.') {
+    fprintf(stderr, "!!! %s: State name '%s' may not start or"
+            " end with '.'\n", caller, name);
+    return 0;
+  }
+
+  for (ii = 0; ii < name_len; ii++) {
+    if (name[ii] == '.') {
+      if (dot_at == ii - 1) {
+        fprintf(stderr, "!!! %s: State name '%s' may not have"
+                " adjacent '.'s\n", caller, name);
+        return 0;
+      }
+      dot_at = ii;
+    } else if (!isalnum(name[ii])) {
+      fprintf(stderr, "!!! %s: State name '%s' may not"
+              " contain '%c' (not alphanumeric)\n", caller, name, name[ii]);
+      return 0;
+    }
+  }
+  return name_len;
+}
+
+/*
+ * Return a kstate state name.
+ *
+ * Returns NULL if it is not possible to make such a name.
+ */
+static int new_state_name(const char *caller, const char *name, char **state_name)
+{
+  if (name == NULL) {
+    fprintf(stderr, "!!! %s: Supplied 'name' may not be NULL\n", caller);
+    return -EINVAL;
+  }
+
+  size_t name_len = check_state_name(caller, name);
+  if (name_len == 0) {
+    return -EINVAL;
+  }
+
+  char *new = malloc(1 + 6 + 1 + name_len + 1);
+  if (new == NULL) return -ENOMEM;
+  sprintf(new, "/kstate.%s", name);
+
+  *state_name = new;
+
+  return 0;
+}
+
+/*
  * Return a unique valid state name starting with prefix.
  *
  * The name is composed of:
  *
+ * * the normal kstate name prefix
  * * the prefix string
  * * the number of microseconds since the epoch
  * * our process id
@@ -181,10 +206,6 @@ extern char *kstate_get_unique_name(const char *prefix)
   sprintf(name, "%s.%ld%06ld.%u.%u", prefix, tv.tv_sec, tv.tv_usec, (uint32_t) pid, extra);
 
   ++extra;
-
-  if (!kstate_check_name(name)) {
-    return NULL;
-  }
 
   return name;
 }
@@ -242,8 +263,8 @@ extern bool kstate_transaction_is_active(kstate_transaction_p transaction)
 extern const char *kstate_get_state_name(kstate_state_p state)
 {
   if (kstate_state_is_subscribed(state)) {
-    // We ignore the leading '/' character, which the user did not specify
-    return &state->name[1];
+    // We ignore the leading '/kstate.' text, which the user did not specify
+    return &state->name[KSTATE_NAME_PREFIX_LEN];
   } else {
     return NULL;
   }
@@ -255,8 +276,8 @@ extern const char *kstate_get_state_name(kstate_state_p state)
 extern const char *kstate_get_transaction_state_name(kstate_transaction_p transaction)
 {
   if (kstate_transaction_is_active(transaction)) {
-    // We ignore the leading '/' character, which the user did not specify
-    return &transaction->name[1];
+    // We ignore the leading '/kstate.' text, which the user did not specify
+    return &transaction->name[KSTATE_NAME_PREFIX_LEN];
   } else {
     return NULL;
   }
@@ -355,7 +376,7 @@ extern void kstate_print_state(FILE           *stream,
   if (kstate_state_is_subscribed(state)) {
     print_state(stream,
                 state->id,
-                state->name+1,      // ignore the leading '/'
+                state->name + KSTATE_NAME_PREFIX_LEN,
                 state->permissions);
   } else {
     fprintf(stream, "State <unsubscribed>");
@@ -404,7 +425,7 @@ extern void kstate_print_transaction(FILE                 *stream,
   if (kstate_transaction_is_active(transaction)) {
     print_transaction(stream,
                       transaction->id,
-                      transaction->name+1,      // ignore the leading '/'
+                      transaction->name + KSTATE_NAME_PREFIX_LEN,
                       transaction->permissions);
   } else {
     fprintf(stream, "Transaction <not active>");
@@ -516,20 +537,14 @@ extern int kstate_subscribe_state(kstate_state_p         state,
   print_state(stdout, state->id, name, permissions);
   printf("\n");
 
-  size_t name_len = kstate_check_name(name);
-  if (name_len == 0) {
-    return -EINVAL;
-  }
-
   if (state_permissions_are_bad(permissions)) {
     return -EINVAL;
   }
 
-  state->name = malloc(name_len + 1 + 1);
-  if (!state->name) return -ENOMEM;
-
-  state->name[0] = '/';
-  strcpy(state->name + 1, name);
+  int rv = new_state_name("kstate_subscribe_state", name, &state->name);
+  if (rv) {
+    return rv;
+  }
 
   // If we had a legitimate permissions set that doesn't include READ,
   // add READ back in
