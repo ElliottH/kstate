@@ -280,6 +280,29 @@ START_TEST(query_state_permissions)
 }
 END_TEST
 
+START_TEST(query_state_pointer)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  void *ptr = kstate_get_state_ptr(state);
+  fail_if(ptr == NULL);
+
+  kstate_unsubscribe_state(state);
+
+  ptr = kstate_get_state_ptr(state);
+  fail_unless(ptr == NULL);
+
+  kstate_free_state(&state);
+
+  ptr = kstate_get_state_ptr(state);
+  fail_unless(ptr == NULL);
+}
+END_TEST
+
 // XXX At the moment, it is allowed to subscribe for WRITE, although
 // XXX this is shorthand for READ|WRITE. Some decision needs to be made
 // XXX about whether this laziness is good or bad.
@@ -628,7 +651,7 @@ START_TEST(free_transaction_also_aborts)  // or, at least, doesn't fall over
 }
 END_TEST
 
-START_TEST(query_transaction_state_name)
+START_TEST(query_transaction_name)
 {
   char *state_name = kstate_get_unique_name("Fred");
 
@@ -640,7 +663,7 @@ START_TEST(query_transaction_state_name)
   rv = kstate_start_transaction(transaction, state, KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
 
-  const char *name = kstate_get_transaction_state_name(transaction);
+  const char *name = kstate_get_transaction_name(transaction);
   ck_assert_str_eq(name, state_name);
 
   free(state_name);
@@ -649,12 +672,12 @@ START_TEST(query_transaction_state_name)
   ck_assert_int_eq(rv, 0);
   fail_if(kstate_transaction_is_active(transaction));
 
-  name = kstate_get_transaction_state_name(transaction);
+  name = kstate_get_transaction_name(transaction);
   fail_unless(name == NULL);
 
   kstate_free_transaction(&transaction);
 
-  name = kstate_get_transaction_state_name(transaction);
+  name = kstate_get_transaction_name(transaction);
   fail_unless(name == NULL);
 
   kstate_unsubscribe_state(state);
@@ -687,6 +710,37 @@ START_TEST(query_transaction_state_permissions)
 
   permissions = kstate_get_transaction_permissions(transaction);
   fail_unless(permissions == 0);
+
+  kstate_unsubscribe_state(state);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(query_transaction_state_pointer)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  void *ptr = kstate_get_transaction_ptr(transaction);
+  fail_if(ptr == NULL);
+
+  rv = kstate_abort_transaction(transaction);
+  ck_assert_int_eq(rv, 0);
+
+  ptr = kstate_get_transaction_ptr(transaction);
+  fail_unless(ptr == NULL);
+
+  kstate_free_transaction(&transaction);
+
+  ptr = kstate_get_transaction_ptr(transaction);
+  fail_unless(ptr == NULL);
 
   kstate_unsubscribe_state(state);
   kstate_free_state(&state);
@@ -1167,6 +1221,7 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, subscribe_for_readwrite_and_free);
   tcase_add_test(tc_core, query_state_name);
   tcase_add_test(tc_core, query_state_permissions);
+  tcase_add_test(tc_core, query_state_pointer);
   tcase_add_test(tc_core, subscribe_for_write_and_unsubscribe);
   tcase_add_test(tc_core, subscribe_for_write_then_for_read);
   tcase_add_test(tc_core, subscribe_for_write_then_for_write);
@@ -1187,8 +1242,9 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, sensible_transaction_committed);
   tcase_add_test(tc_core, commit_readonly_transaction_fails);
   tcase_add_test(tc_core, free_transaction_also_aborts);
-  tcase_add_test(tc_core, query_transaction_state_name);
+  tcase_add_test(tc_core, query_transaction_name);
   tcase_add_test(tc_core, query_transaction_state_permissions);
+  tcase_add_test(tc_core, query_transaction_state_pointer);
   tcase_add_test(tc_core, abort_transaction_twice_fails);
   tcase_add_test(tc_core, commit_transaction_twice_fails);
   tcase_add_test(tc_core, abort_NULL_fails);

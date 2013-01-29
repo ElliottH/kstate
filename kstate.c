@@ -271,9 +271,9 @@ extern const char *kstate_get_state_name(kstate_state_p state)
 }
 
 /*
- * Return a transaction's state name, or NULL if it is not active.
+ * Return a transaction's name, or NULL if it is not active.
  */
-extern const char *kstate_get_transaction_state_name(kstate_transaction_p transaction)
+extern const char *kstate_get_transaction_name(kstate_transaction_p transaction)
 {
   if (kstate_transaction_is_active(transaction)) {
     // We ignore the leading '/kstate.' text, which the user did not specify
@@ -308,7 +308,7 @@ extern uint32_t kstate_get_transaction_permissions(kstate_transaction_p transact
 }
 
 /*
- * Return a state's id, or 0 if it is not active.
+ * Return a state's id, or 0 if it is not subscribed.
  *
  * We do not say anything about the value of the id, except that 0 means the
  * state is unsubscribed, the same state always has the same id, and two
@@ -336,6 +336,42 @@ extern uint32_t kstate_get_transaction_id(kstate_transaction_p transaction)
     return transaction->id;
   } else {
     return 0;
+  }
+}
+
+/*
+ * Return a state's shared memory pointer, or NULL if it is not subscribed.
+ *
+ * Note that this is always a pointer to read-only shared memory, as
+ * one must use a transaction to write.
+ *
+ * Beware that this pointer stops being valid as soon as the state is
+ * unsubscribed (or freed, which implicitly unsubscribes it).
+ */
+extern void *kstate_get_state_ptr(kstate_state_p state)
+{
+  if (kstate_state_is_subscribed(state)) {
+    return state->map_addr;
+  } else {
+    return NULL;
+  }
+}
+
+/*
+ * Return a transaction's shared memory pointer, or NULL if it is not active.
+ *
+ * Whether this can be used to write to the shared memory depends upon the
+ * protection requested for the transaction.
+ *
+ * Beware that this pointer stops being valid as soon as the transaction is
+ * committed or aborted (or freed, which implicitly aborts it).
+ */
+extern void *kstate_get_transaction_ptr(kstate_transaction_p transaction)
+{
+  if (kstate_transaction_is_active(transaction)) {
+    return transaction->map_addr;
+  } else {
+    return NULL;
   }
 }
 
@@ -434,11 +470,6 @@ extern void kstate_print_transaction(FILE                 *stream,
   if (eol)
     fprintf(stream, "\n");
 }
-
-// XXX Also add "valid" functions for each of state_p and transaction_p
-// XXX Also add get_ptr, get_name and get_permissions functions for state_p
-// XXX Also add get_state function for transaction_p ???
-// XXX Also add comparison function for state_p and transaction_p
 
 /*
  * Create a new "empty" state.
@@ -610,13 +641,14 @@ extern int kstate_subscribe_state(kstate_state_p         state,
   }
 
   // Some defaults just for now...
-  int prot = PROT_READ;
   int flags = MAP_SHARED;
 
   // Again, by default map the whole available area, starting at the
-  // start of the "file".
+  // start of the "file". Note that we only map for READ, regardless
+  // of the permissions - the caller must use a transaction if they
+  // want to write to the memory.
   state->map_length = page_size;
-  state->map_addr = mmap(NULL, state->map_length, prot, flags, shm_fd, 0);
+  state->map_addr = mmap(NULL, state->map_length, PROT_READ, flags, shm_fd, 0);
   if (state->map_addr == MAP_FAILED) {
     int rv = errno;
     kstate_print_state(stderr, "!!! kstate_subscribe_state:"
