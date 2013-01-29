@@ -660,6 +660,19 @@ extern void kstate_unsubscribe_state(kstate_state_p  state)
   }
 
   if (state->name) {
+    int rv = shm_unlink(state->name);
+    if (rv) {
+      rv = errno;
+      if (rv == ENOENT) {
+        fprintf(stderr, "... kstate_unsubscribe_state:"
+                " Unable to unlink %s, it has already gone.\n", state->name);
+      } else {
+        fprintf(stderr, "!!! kstate_unsubscribe_state:"
+                " Error unlinking %s: %d %s\n", state->name,
+                rv, strerror(rv));
+      }
+    }
+
     free(state->name);
     state->name = NULL;
   }
