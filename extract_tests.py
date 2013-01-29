@@ -9,6 +9,8 @@ Usage:
 Looks for tests declared as::
 
     START_TEST(<name>)
+    START_TEST(<name>) // expect signal <SIGNAL>
+    START_TEST(<name>) // any other sort of comment
 
 and replaces the text between::
 
@@ -21,6 +23,12 @@ and::
 with lines of the form::
 
   tcase_add_test(tc_core, <name>);
+
+or::
+
+  tcase_add_test_raise_signal(tc_core, <name>, <SIGNAL>);
+
+as appropriate.
 
 It's terribly simple.
 """
@@ -56,7 +64,23 @@ import sys
 
 from difflib import ndiff
 
-test_pattern = "START_TEST\((?P<test>.*)\)"
+test_pattern = """\
+START_TEST\(
+  (?P<test>.*)              # the name of our test
+\)
+((                          # followed by
+  \s+ // \s+                # a comment starting with spaces and
+  (                         # either
+    expect \s* signal \s*   # the "expect signal" keywords
+    (?P<signal>.*)          # followed by the name of the signal we're expecting
+  ) | (                     # or
+    .*                      # anything (just a comment)
+  )
+  \n
+) | (                       # or
+  \n                        # and EOL
+))
+"""
 
 file_pattern = """\
 (?P<start>
@@ -82,11 +106,16 @@ def extract_tests(c_file):
     """
     with open(c_file,'r') as file:
         data = file.read()
-    matches = re.finditer(test_pattern, data)
+    matches = re.finditer(test_pattern, data, re.VERBOSE)
     tests = []
     for m in matches:
-        print '  Found ',m.group('test')
-        tests.append(m.group('test'))
+        if m.group('signal'):
+            print '  Found ',m.group('test'), 'expect signal', m.group('signal')
+            tests.append((m.group('test'), 'signal', m.group('signal')))
+        else:
+            print '  Found ',m.group('test')
+            tests.append((m.group('test'), None, None))
+
     return tests
 
 def split_file(c_file):
@@ -125,8 +154,11 @@ def process_file(c_file):
         return
 
     new_middle = []
-    for test in tests:
-        new_middle.append('  tcase_add_test(tc_core, %s);'%test)
+    for test, what, signal in tests:
+        if what == 'signal':
+            new_middle.append('  tcase_add_test_raise_signal(tc_core, %s, %s);'%(test, signal))
+        else:
+            new_middle.append('  tcase_add_test(tc_core, %s);'%test)
     new_middle = '\n'.join(new_middle) + '\n'
 
     try:

@@ -4,7 +4,8 @@ Problems with check
 (Mind, I'm very greatful for it! It's still wonderful it (a) exists, and (b)
 uses forking to make it possible to handle segmentation faults, etc, - this is
 a fundamental requirement to my mind. And the list of *good things* about
-check would be a LOT longer.)
+check would be a LOT longer. Not least the support for testing for signals,
+which is really cool.)
 
 1. LGPL, which I'd prefer otherwise. This is a very minor problem, really.
 

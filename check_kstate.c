@@ -39,6 +39,7 @@
 #include <check.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <signal.h>
 
 #include "kstate.h"
 
@@ -300,6 +301,47 @@ START_TEST(query_state_pointer)
 
   ptr = kstate_get_state_ptr(state);
   fail_unless(ptr == NULL);
+}
+END_TEST
+
+START_TEST(can_read_state_pointer)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  void *ptr = kstate_get_state_ptr(state);
+  fail_if(ptr == NULL);
+
+  // When the shared memory is first set up, it is all zeroes
+  uint32_t *first = ptr;
+  ck_assert_int_eq(*first, 0);
+
+  kstate_unsubscribe_state(state);
+  kstate_free_state(&state);
+}
+END_TEST
+
+START_TEST(writing_state_pointer_fails) // expect signal SIGSEGV
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_READ|KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  void *ptr = kstate_get_state_ptr(state);
+  fail_if(ptr == NULL);
+
+  // This should fail, because we are meant to use a transaction to alter
+  // a state's data
+  uint32_t *first = ptr;
+  *first = 1;
+
+  kstate_unsubscribe_state(state);
+  kstate_free_state(&state);
 }
 END_TEST
 
@@ -1222,6 +1264,8 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, query_state_name);
   tcase_add_test(tc_core, query_state_permissions);
   tcase_add_test(tc_core, query_state_pointer);
+  tcase_add_test(tc_core, can_read_state_pointer);
+  tcase_add_test_raise_signal(tc_core, writing_state_pointer_fails, SIGSEGV);
   tcase_add_test(tc_core, subscribe_for_write_and_unsubscribe);
   tcase_add_test(tc_core, subscribe_for_write_then_for_read);
   tcase_add_test(tc_core, subscribe_for_write_then_for_write);
