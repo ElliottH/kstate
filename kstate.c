@@ -57,6 +57,8 @@ struct kstate_transaction {
   char      *name;        // The name of our shared memory object
   uint32_t   permissions; // Our idea of its permissions
 
+  uint32_t   id;          // A simple id for this transaction
+
   void      *map_addr;    // The shared memory associated with it
   size_t     map_length;  // and how much shared memory there is
 };
@@ -327,10 +329,11 @@ extern void kstate_print_state(FILE           *stream,
 }
 
 static void print_transaction(FILE       *stream,
+                              uint32_t    id,
                               const char *name,
                               uint32_t    permissions)
 {
-  fprintf(stream, "Transaction for ");
+  fprintf(stream, "Transaction %u for ", id);
   if (permissions) {
     if (permissions & KSTATE_READ)
       fprintf(stream, "read");
@@ -363,6 +366,7 @@ extern void kstate_print_transaction(FILE                 *stream,
 
   if (kstate_transaction_is_active(transaction)) {
     print_transaction(stream,
+                      transaction->id,
                       transaction->name+1,      // ignore the leading '/'
                       transaction->permissions);
   } else {
@@ -624,8 +628,11 @@ extern void kstate_unsubscribe(kstate_state_p  state)
  */
 extern struct kstate_transaction *kstate_new_transaction(void)
 {
+  static uint32_t next_transaction_id = 0;
+
   struct kstate_transaction *new = malloc(sizeof(struct kstate_transaction));
   memset(new, 0, sizeof(*new));
+  new->id = next_transaction_id++;
   return new;
 }
 

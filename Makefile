@@ -96,10 +96,13 @@ test: extract_tests $(TEST_PROG)
 # We assume that 'check' has been installed, typically with
 #   sudo apt-get install check
 $(TEST_PROG): check_kstate.c $(STATIC_TARGET)
-	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -o $@ $(WARNING_FLAGS) $^ -lcheck -lrt
+	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -g -o $@ $(WARNING_FLAGS) $^ -lcheck -lrt
 
-simple: simple.c $(SHARED_TARGET)
-	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -g -o $@ $(WARNING_FLAGS) $< -L$(TARGET_DIR) -lkstate -lrt
+simple: simple.c $(STATIC_TARGET)
+	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -g -o $@ $(WARNING_FLAGS) $^ -lrt
+
+#simple: simple.c $(SHARED_TARGET)
+#	$(CC) $(INCLUDE_FLAGS) $(CFLAGS) -g -o $@ $(WARNING_FLAGS) $< -L$(TGTDIR) -lkstate -lrt
 
 # For the moment, at least, whilst I'm adding tests, also run
 # extract_tests.py
