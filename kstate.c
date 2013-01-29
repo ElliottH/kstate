@@ -55,9 +55,9 @@ struct kstate_state {
 
 struct kstate_transaction {
   char      *name;        // The name of our shared memory object
-  uint32_t   permissions; // Our idea of its permissions
 
   uint32_t   id;          // A simple id for this transaction
+  uint32_t   permissions; // The permissions for this transaction
 
   void      *map_addr;    // The shared memory associated with it
   size_t     map_length;  // and how much shared memory there is
@@ -188,12 +188,7 @@ extern char *kstate_get_unique_name(const char *prefix)
   return name;
 }
 
-/*
- * Given state permissions, are they valid?
- *
- * Returns true if they're bad, false if we like them
- */
-static bool kstate_permissions_are_bad(uint32_t permissions)
+static bool state_permissions_are_bad(uint32_t permissions)
 {
   if (!permissions) {
     fprintf(stderr, "!!! kstate_subscribe: Unset permissions bits (0x0) not allowed\n");
@@ -201,6 +196,21 @@ static bool kstate_permissions_are_bad(uint32_t permissions)
   }
   else if (permissions & ~(KSTATE_READ | KSTATE_WRITE)) {
     fprintf(stderr, "!!! kstate_subscribe: Unexpected permission bits 0x%x in 0x%x\n",
+            permissions & ~(KSTATE_READ | KSTATE_WRITE),
+            permissions);
+    return true;
+  }
+  return false;
+}
+
+static bool transaction_permissions_are_bad(uint32_t permissions)
+{
+  if (!permissions) {
+    fprintf(stderr, "!!! kstate_start_transaction: Unset permissions bits (0x0) not allowed\n");
+    return true;
+  }
+  else if (permissions & ~(KSTATE_READ | KSTATE_WRITE)) {
+    fprintf(stderr, "!!! kstate_start_transaction: Unexpected permission bits 0x%x in 0x%x\n",
             permissions & ~(KSTATE_READ | KSTATE_WRITE),
             permissions);
     return true;
@@ -264,9 +274,9 @@ extern uint32_t kstate_get_state_permissions(kstate_state_p state)
 }
 
 /*
- * Return a transaction's state permissions, or 0 if it is not active.
+ * Return a transaction's permissions, or 0 if it is not active.
  */
-extern uint32_t kstate_get_transaction_state_permissions(kstate_transaction_p transaction)
+extern uint32_t kstate_get_transaction_permissions(kstate_transaction_p transaction)
 {
   if (kstate_transaction_is_active(transaction)) {
     return transaction->permissions;
@@ -389,7 +399,7 @@ extern void kstate_print_transaction(FILE                 *stream,
  * populate it::
  *
  *     kstate_state_p state = kstate_new_state();
- *     int ret = kstate_subscribe("State.Name", KSTATE_READ, state);
+ *     int ret = kstate_subscribe("State.Name", KSTATE_READ|KSTATE_WRITE, state);
  *
  * and then eventually to destroy it::
  *
@@ -435,6 +445,7 @@ extern void kstate_free_state(kstate_state_p *state)
  * - ``name`` is the name of the state to subscribe to.
  * - ``permissions`` is constructed by OR'ing the permission flags
  *   KSTATE_READ and/or KSTATE_WRITE. At least one of those must be given.
+ *   KSTATE_WRITE by itself is regarded as equivalent to KSTATE_WRITE|KSTATE_READ.
  * - ``state`` is the actual state identifier, as amended by this function.
  *
  * A state name may contain A-Z, a-z, 0-9 and the dot (.) character. It may not
@@ -443,6 +454,10 @@ extern void kstate_free_state(kstate_state_p *state)
  *
  * If this is the first subscription to the named state, then the shared
  * data for the state will be created.
+ *
+ * Note that the first subscription to a state cannot be read-only, as there is
+ * nothing to read -i.e., the first subscription to a state must be for
+ * KSTATE_WRITE|KSTATE_READ.
  *
  * Returns 0 if the subscription succeeds, or a negative value if it fails.
  * The negative value will be ``-errno``, giving an indication of why the
@@ -472,7 +487,7 @@ extern int kstate_subscribe(kstate_state_p         state,
     return -EINVAL;
   }
 
-  if (kstate_permissions_are_bad(permissions)) {
+  if (state_permissions_are_bad(permissions)) {
     return -EINVAL;
   }
 
@@ -481,6 +496,13 @@ extern int kstate_subscribe(kstate_state_p         state,
 
   state->name[0] = '/';
   strcpy(state->name + 1, name);
+
+  // If we had a legitimate permissions set that doesn't include READ,
+  // add READ back in
+  if (!(permissions & KSTATE_READ)) {
+    permissions |= KSTATE_READ;
+  }
+
   state->permissions = permissions;
 
   int oflag = 0;
@@ -614,7 +636,7 @@ extern void kstate_unsubscribe(kstate_state_p  state)
  * populate it::
  *
  *     struct kstate_transaction *transaction = kstate_new_transaction();
- *     int ret = kstate_start_transaction(&transaction, state);
+ *     int ret = kstate_start_transaction(&transaction, state, KSTATE_WRITE);
  *
  * and then eventually to destroy it::
  *
@@ -663,6 +685,9 @@ extern void kstate_free_transaction(kstate_transaction_p *transaction)
  *
  * * 'transaction' is the transaction to start.
  * * 'state' is the state on which to start the transaction.
+ * - 'permissions' is constructed by OR'ing the permission flags
+ *   KSTATE_READ and/or KSTATE_WRITE. At least one of those must be given.
+ *   KSTATE_WRITE by itself is regarded as equivalent to KSTATE_WRITE|KSTATE_READ.
  *
  * Note that copy of the state will be taken, so that the transaction
  * can continue to access the state's shared memory even if the particular
@@ -676,7 +701,8 @@ extern void kstate_free_transaction(kstate_transaction_p *transaction)
  * the function failed.
  */
 extern int kstate_start_transaction(kstate_transaction_p  transaction,
-                                    kstate_state_p        state)
+                                    kstate_state_p        state,
+                                    uint32_t              permissions)
 {
   if (transaction == NULL) {
     fprintf(stderr, "!!! kstate_start_transaction: transaction argument may"
@@ -702,12 +728,30 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
 
   kstate_print_state(stdout, "Starting Transaction on ", state, true);
 
+  if (transaction_permissions_are_bad(permissions)) {
+    return -EINVAL;
+  }
+
+  // If we had a legitimate permissions set that doesn't include READ,
+  // add READ back in
+  if (!(permissions & KSTATE_READ)) {
+    permissions |= KSTATE_READ;
+  }
+
+  if ((permissions & KSTATE_WRITE) && !(state->permissions & KSTATE_WRITE)) {
+    fprintf(stderr, "!!! kstate_start_transaction: Cannot start a write"
+            " transaction on a read-only state\n");
+    kstate_print_state(stderr, "!!! ", state, true);
+    return -EINVAL;
+  }
+
+  transaction->permissions = permissions;
+
   size_t name_len = strlen(state->name);
   transaction->name = malloc(name_len + 1);
   if (transaction->name == NULL) return -ENOMEM;
 
   strcpy(transaction->name, state->name);
-  transaction->permissions = state->permissions;
   transaction->map_length = state->map_length;
 
   // Some defaults just for now...
