@@ -36,12 +36,77 @@
  * ***** END LICENSE BLOCK *****
  */
 
+#define _XOPEN_SOURCE 600 // enable nftw, etc.
+#include <ftw.h>          // for nftw
+
 #include <check.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <signal.h>
 
 #include "kstate.h"
+
+static int delete_file_fn(const char *fpath,
+                          const struct stat *sb __attribute__((unused)) ,
+                          int typeflag,
+                          struct FTW *ftwbuf)
+{
+  int rv = 0;
+  if (typeflag == FTW_F) {
+  } else if (typeflag == FTW_DP) {
+    // This is a directory, all of whose contents have been visited. Ignore it.
+    return 0;
+  } else if (typeflag == FTW_SL) {
+    // This is a symbolic link. Ignore it.
+    return 0;
+  } else {
+    // This shouldn't really happen. Ignore it.
+    return 0;
+  }
+
+  // The FTW structure conveniently gives us the offset of the filename
+  // within its full path
+  if (!strncmp("kstate.", &fpath[ftwbuf->base], 7)) {
+    printf(".. deleting file %s\n", fpath);
+    rv = remove(&fpath[ftwbuf->base]);
+    if (rv) {
+      fprintf(stderr, "### Error trying to remove %s: %d %s\n",
+              fpath, errno, strerror(errno));
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Returns 0 if all went well, -1 if an error occurred.
+ */
+static int delete_our_kstate_shm_files(void)
+{
+  const char *dirpath = "/dev/shm";
+
+  printf("Tidying up: deleting kstate files from %s\n", dirpath);
+
+  // FTW_CHDIR means we change into the directory we are inspecting,
+  // which makes it easier to check filenames before we delete them
+  // (see delete_file_fn).
+  //
+  // Since we're not expecting any subdirectories, we don't care what
+  // order directories are checked in.
+  //
+  // Unusually, we do want to follow symbolic links, as we happen to know that
+  // /dev/shm is commonly a link to the less obvious /run/shm
+  errno = 0;
+  int rv = nftw(dirpath, delete_file_fn, 2, FTW_CHDIR);
+  if (rv && errno == ENOENT) {
+    printf(".. nothing to delete\n");
+  } else if (rv) {
+    fprintf(stderr, "### Error deleting contents of %s\n", dirpath);
+    return -1;
+  }
+  return 0;
+}
+
 
 START_TEST(new_and_free_state)
 {
@@ -1552,18 +1617,24 @@ Suite *test_kstate_suite(void)
 
 int main (void)
 {
- int number_failed;
- Suite *s = test_kstate_suite();
- SRunner *sr = srunner_create(s);
- srunner_run_all(sr, CK_NORMAL);
- number_failed = srunner_ntests_failed(sr);
- srunner_free(sr);
- if (number_failed == 0) {
-   printf("\nThe light is GREEN\n");
- } else {
-   printf("\nThe light is RED\n");
- }
- return number_failed;
+  int number_failed;
+  Suite *s = test_kstate_suite();
+  SRunner *sr = srunner_create(s);
+  srunner_run_all(sr, CK_NORMAL);
+  number_failed = srunner_ntests_failed(sr);
+  srunner_free(sr);
+
+  // Ensure we tidy up any left-over shared memory object files
+  printf("\n");
+  delete_our_kstate_shm_files();
+  printf("\n");
+
+  if (number_failed == 0) {
+    printf("The light is GREEN\n");
+  } else {
+    printf("The light is RED\n");
+  }
+  return number_failed;
 }
 
 // vim: set tabstop=8 softtabstop=2 shiftwidth=2 expandtab:
