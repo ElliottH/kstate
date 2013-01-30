@@ -60,9 +60,10 @@ struct kstate_transaction {
   uint32_t   id;          // A simple id for this transaction
   uint32_t   permissions; // The permissions for this transaction
 
-  void      *orig_map_addr; // The shared memory associated with the state
-  void      *map_addr;      // Our own shared memory, starting as a copy
-  size_t     map_length;    // The length of both of those
+  void      *state_map_addr; // The shared memory associated with the state
+  uint8_t   *state_map_copy; // A copy of the original values therein
+  void      *map_addr;       // Our own shared memory, starting as another copy
+  size_t     map_length;     // The length of those
 };
 
 static int num_digits(int value)
@@ -694,7 +695,7 @@ extern void kstate_unsubscribe_state(kstate_state_p  state)
 
   kstate_print_state(stdout, "Unsubscribing from ", state, true);
 
-  if (state->map_addr != 0 && state->map_addr != MAP_FAILED) {
+  if (state->map_addr != NULL && state->map_addr != MAP_FAILED) {
     int rv = munmap(state->map_addr, state->map_length);
     if (rv) {
       rv = errno;
@@ -784,8 +785,13 @@ extern void kstate_free_transaction(kstate_transaction_p *transaction)
 
 static int clear_transaction(char *caller, kstate_transaction_p  transaction)
 {
-  if (transaction->orig_map_addr != 0 && transaction->orig_map_addr != MAP_FAILED) {
-    int rv = munmap(transaction->orig_map_addr, transaction->map_length);
+  if (transaction->state_map_copy) {
+    free(transaction->state_map_copy);
+    transaction->state_map_copy = NULL;
+  }
+
+  if (transaction->state_map_addr != NULL && transaction->state_map_addr != MAP_FAILED) {
+    int rv = munmap(transaction->state_map_addr, transaction->map_length);
     if (rv) {
       rv = errno;
       fprintf(stderr, "!!! %s: ", caller);
@@ -793,10 +799,10 @@ static int clear_transaction(char *caller, kstate_transaction_p  transaction)
       fprintf(stderr, ": %d %s\n", rv, strerror(rv));
       return -rv;
     }
-    transaction->orig_map_addr = 0;
+    transaction->state_map_addr = 0;
   }
 
-  if (transaction->map_addr != 0 && transaction->map_addr != MAP_FAILED) {
+  if (transaction->map_addr != NULL && transaction->map_addr != MAP_FAILED) {
     int rv = munmap(transaction->map_addr, transaction->map_length);
     if (rv) {
       rv = errno;
@@ -919,8 +925,8 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
     return -rv;
   }
 
-  transaction->orig_map_addr = mmap(NULL, transaction->map_length, map_prot, MAP_SHARED, shm_fd, 0);
-  if (transaction->orig_map_addr == MAP_FAILED) {
+  transaction->state_map_addr = mmap(NULL, transaction->map_length, map_prot, MAP_SHARED, shm_fd, 0);
+  if (transaction->state_map_addr == MAP_FAILED) {
     int rv = errno;
     kstate_print_state(stderr, "!!! kstate_start_transaction:"
                        " Error in mapping shared memory for Transaction on ", state, false);
@@ -931,7 +937,22 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
   }
   close(shm_fd);
 
-  // Then we need our own copy of the data, which is independent of that
+  // If we're a writable transaction, we will need to know if that state
+  // data has changed when we try to commit. The simplest way to do that
+  // is to keep a copy of the current state of the data.
+  // XXX There's a hole whilst we're copying it where things can go wrong
+  // XXX here - we need some locking...
+  if (transaction->permissions & KSTATE_WRITE) {
+    transaction->state_map_copy = malloc(transaction->map_length);
+    if (transaction->state_map_copy == NULL) {
+      clear_transaction("kstate_start_transaction", transaction);
+      return -ENOMEM;
+    }
+    memcpy(transaction->state_map_copy, transaction->state_map_addr,
+           transaction->map_length);
+  }
+
+  // Then we need our own version of the data, which is independent of that
   // for the state - both in case the state changes during our transaction,
   // and also (if we're allowed to) because we might write to our own copy
   // However, since we're going to make a copy of the original data, we
@@ -948,7 +969,7 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
   }
 
   // And obviously we need to copy one to the other...
-  memcpy(transaction->map_addr, transaction->orig_map_addr, transaction->map_length);
+  memcpy(transaction->map_addr, transaction->state_map_addr, transaction->map_length);
 
   if (!(permissions & KSTATE_WRITE)) {
     // Revoke permission to write to our internal data
@@ -1042,15 +1063,42 @@ extern int kstate_commit_transaction(struct kstate_transaction  *transaction)
 
   kstate_print_transaction(stdout, "Committing ", transaction, true);
 
-  // Has our data actually changed? If not, we've nothing to do
-  // (I'm rather assuming that the comparison is worth doing to avoid an
-  // unnecessary copy - this should probably be checked)
-  if (memcmp(transaction->orig_map_addr, transaction->map_addr, transaction->map_length)) {
-    memcpy(transaction->orig_map_addr, transaction->map_addr, transaction->map_length);
+  int retcode = 0;
+
+  // We can commit if the state has not changed from our idea of its original
+  // value - i.e., it is as if no-one else has altered it.
+  //
+  // (Presumably, someone altering it and putting it back again while we
+  // weren't looking is not our problem.)
+  //
+  // If someone else has changed the state, then we're meant to fail.
+  //
+  // Maybe if we were nice we'd also check to see if we're trying to change
+  // it to the same thing as someone else has already set it to (!) - we
+  // could conveivably be trying to update <data> to the same value
+  if (memcmp(transaction->state_map_addr, transaction->state_map_copy, transaction->map_length)) {
+    fprintf(stderr, "!!! kstate_commit_transaction: Cannot commit as ");
+    kstate_print_transaction(stderr, "the underlying state for ", transaction, false);
+    fprintf(stderr, " has changed during the transaction\n");
+    retcode = -EPERM;
+  } else if (memcmp(transaction->state_map_addr, transaction->map_addr, transaction->map_length)) {
+    fprintf(stderr, "... kstate_commit_transaction: OK to commit as ");
+    kstate_print_transaction(stderr, "the underlying state for ", transaction, false);
+    fprintf(stderr, " did not change during the transaction\n");
+    memcpy(transaction->state_map_addr, transaction->map_addr, transaction->map_length);
+    retcode = 0;
+  } else {
+    fprintf(stderr, "... kstate_commit_transaction: No need to commit, as ");
+    kstate_print_transaction(stderr, "the underlying state for ", transaction, false);
+    fprintf(stderr, " matches the result of the transaction\n");
+    retcode = 0;
   }
 
   int rv = clear_transaction("kstate_commit_transaction", transaction);
-  return rv;
+  if (retcode)
+    return retcode;
+  else
+    return rv;
 }
 
 // vim: set tabstop=8 softtabstop=2 shiftwidth=2 expandtab:

@@ -324,6 +324,7 @@ START_TEST(can_read_state_pointer)
 }
 END_TEST
 
+// NB: This will "leak" a kstate state in /dev/shm
 START_TEST(writing_state_pointer_fails) // expect signal SIGSEGV
 {
   char *state_name = kstate_get_unique_name("Fred");
@@ -1219,6 +1220,7 @@ START_TEST(interleaved_transactions_same_state_abort_commit)
 }
 END_TEST
 
+// NB: This will "leak" a kstate state in /dev/shm
 START_TEST(write_to_readonly_transaction_fails) // expect signal SIGSEGV
 {
   char *state_name = kstate_get_unique_name("Fred");
@@ -1374,6 +1376,85 @@ START_TEST(write_to_writeable_transaction_not_visible_after_abort)
 }
 END_TEST
 
+START_TEST(commit_when_state_changed_during_transaction_fails)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction1 = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction1, state, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction2 = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction2, state, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  uint32_t *t_ptr1 = kstate_get_transaction_ptr(transaction1);
+  *t_ptr1 = 0x12345678;
+
+  rv = kstate_commit_transaction(transaction1);
+  ck_assert_int_eq(rv, 0);
+  kstate_free_transaction(&transaction1);
+
+  uint32_t *t_ptr2 = kstate_get_transaction_ptr(transaction2);
+  *t_ptr2 = 0x87654321;
+
+  rv = kstate_commit_transaction(transaction2);
+  ck_assert_int_eq(rv, -EPERM);
+  kstate_free_transaction(&transaction2);
+
+  uint32_t *s_ptr = kstate_get_state_ptr(state);
+  ck_assert_int_eq(*s_ptr, 0x12345678);
+
+  kstate_free_state(&state);
+  fail_unless(state == NULL);
+}
+END_TEST
+
+START_TEST(abort_when_state_changed_during_transaction_succeeds)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction1 = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction1, state, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_transaction_p transaction2 = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction2, state, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  uint32_t *t_ptr1 = kstate_get_transaction_ptr(transaction1);
+  ck_assert_int_eq(*t_ptr1, 0);
+  *t_ptr1 = 0x12345678;
+
+  rv = kstate_commit_transaction(transaction1);
+  ck_assert_int_eq(rv, 0);
+  kstate_free_transaction(&transaction1);
+
+  uint32_t *t_ptr2 = kstate_get_transaction_ptr(transaction2);
+  ck_assert_int_eq(*t_ptr2, 0);
+  *t_ptr2 = 0x87654321;
+
+  rv = kstate_abort_transaction(transaction2);
+  ck_assert_int_eq(rv, 0);
+  kstate_free_transaction(&transaction2);
+
+  uint32_t *s_ptr = kstate_get_state_ptr(state);
+  ck_assert_int_eq(rv, 0);
+  ck_assert_int_eq(*s_ptr, 0x12345678);
+
+  kstate_free_state(&state);
+  fail_unless(state == NULL);
+}
+END_TEST
+
 Suite *test_kstate_suite(void)
 {
   Suite *s = suite_create("Kstate");
@@ -1450,6 +1531,8 @@ Suite *test_kstate_suite(void)
   tcase_add_test(tc_core, write_to_writeable_transaction_visible_after_commit);
   tcase_add_test(tc_core, write_to_writeable_transaction_not_visible_before_end_of_transaction);
   tcase_add_test(tc_core, write_to_writeable_transaction_not_visible_after_abort);
+  tcase_add_test(tc_core, commit_when_state_changed_during_transaction_fails);
+  tcase_add_test(tc_core, abort_when_state_changed_during_transaction_succeeds);
   // END TESTS
   suite_add_tcase(s, tc_core);
 
