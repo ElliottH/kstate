@@ -1384,6 +1384,9 @@ START_TEST(commit_when_state_changed_during_transaction_fails)
   free(state_name);
   ck_assert_int_eq(rv, 0);
 
+  uint32_t *s_ptr = kstate_get_state_ptr(state);
+  ck_assert_int_eq(*s_ptr, 0);
+
   kstate_transaction_p transaction1 = kstate_new_transaction();
   rv = kstate_start_transaction(transaction1, state, KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
@@ -1395,9 +1398,13 @@ START_TEST(commit_when_state_changed_during_transaction_fails)
   uint32_t *t_ptr1 = kstate_get_transaction_ptr(transaction1);
   *t_ptr1 = 0x12345678;
 
+  ck_assert_int_eq(*s_ptr, 0);
+
   rv = kstate_commit_transaction(transaction1);
   ck_assert_int_eq(rv, 0);
   kstate_free_transaction(&transaction1);
+
+  ck_assert_int_eq(*s_ptr, 0x12345678);
 
   uint32_t *t_ptr2 = kstate_get_transaction_ptr(transaction2);
   *t_ptr2 = 0x87654321;
@@ -1406,7 +1413,6 @@ START_TEST(commit_when_state_changed_during_transaction_fails)
   ck_assert_int_eq(rv, -EPERM);
   kstate_free_transaction(&transaction2);
 
-  uint32_t *s_ptr = kstate_get_state_ptr(state);
   ck_assert_int_eq(*s_ptr, 0x12345678);
 
   kstate_free_state(&state);
@@ -1422,6 +1428,9 @@ START_TEST(abort_when_state_changed_during_transaction_succeeds)
   free(state_name);
   ck_assert_int_eq(rv, 0);
 
+  uint32_t *s_ptr = kstate_get_state_ptr(state);
+  ck_assert_int_eq(*s_ptr, 0);
+
   kstate_transaction_p transaction1 = kstate_new_transaction();
   rv = kstate_start_transaction(transaction1, state, KSTATE_WRITE);
   ck_assert_int_eq(rv, 0);
@@ -1434,6 +1443,8 @@ START_TEST(abort_when_state_changed_during_transaction_succeeds)
   ck_assert_int_eq(*t_ptr1, 0);
   *t_ptr1 = 0x12345678;
 
+  ck_assert_int_eq(*s_ptr, 0);
+
   rv = kstate_commit_transaction(transaction1);
   ck_assert_int_eq(rv, 0);
   kstate_free_transaction(&transaction1);
@@ -1442,12 +1453,12 @@ START_TEST(abort_when_state_changed_during_transaction_succeeds)
   ck_assert_int_eq(*t_ptr2, 0);
   *t_ptr2 = 0x87654321;
 
+  ck_assert_int_eq(*s_ptr, 0x12345678);
+
   rv = kstate_abort_transaction(transaction2);
   ck_assert_int_eq(rv, 0);
   kstate_free_transaction(&transaction2);
 
-  uint32_t *s_ptr = kstate_get_state_ptr(state);
-  ck_assert_int_eq(rv, 0);
   ck_assert_int_eq(*s_ptr, 0x12345678);
 
   kstate_free_state(&state);
