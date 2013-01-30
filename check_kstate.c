@@ -1300,6 +1300,43 @@ START_TEST(write_to_writeable_transaction_visible_after_commit)
 }
 END_TEST
 
+START_TEST(write_to_writeable_transaction_not_visible_before_end_of_transaction)
+{
+  char *state_name = kstate_get_unique_name("Fred");
+  kstate_state_p state = kstate_new_state();
+  int rv = kstate_subscribe_state(state, state_name, KSTATE_WRITE);
+  free(state_name);
+  ck_assert_int_eq(rv, 0);
+
+  // As we remember, the mapped area starts off all zeroes
+  uint32_t *s_ptr1 = kstate_get_state_ptr(state);
+  ck_assert_int_eq(rv, 0);
+  ck_assert_int_eq(*s_ptr1, 0);
+
+  kstate_transaction_p transaction = kstate_new_transaction();
+  rv = kstate_start_transaction(transaction, state, KSTATE_WRITE);
+  ck_assert_int_eq(rv, 0);
+
+  uint32_t *t_ptr = kstate_get_transaction_ptr(transaction);
+  *t_ptr = 0x12345678;
+
+  uint32_t *s_ptr2 = kstate_get_state_ptr(state);
+  ck_assert_int_eq(rv, 0);
+  // The state still has the same location mapped
+  fail_unless(s_ptr1 == s_ptr2);
+  // The state does not see the uncommitted change
+  ck_assert_int_eq(*s_ptr2, 0);
+
+  rv = kstate_abort_transaction(transaction);
+  ck_assert_int_eq(rv, 0);
+
+  kstate_free_transaction(&transaction);
+
+  kstate_free_state(&state);
+  fail_unless(state == NULL);
+}
+END_TEST
+
 START_TEST(write_to_writeable_transaction_not_visible_after_abort)
 {
   char *state_name = kstate_get_unique_name("Fred");
@@ -1327,10 +1364,8 @@ START_TEST(write_to_writeable_transaction_not_visible_after_abort)
 
   uint32_t *s_ptr2 = kstate_get_state_ptr(state);
   ck_assert_int_eq(rv, 0);
-
   // The state still has the same location mapped
   fail_unless(s_ptr1 == s_ptr2);
-
   // The state does not see the uncommitted change
   ck_assert_int_eq(*s_ptr2, 0);
 
@@ -1413,6 +1448,7 @@ Suite *test_kstate_suite(void)
   tcase_add_test_raise_signal(tc_core, write_to_readonly_transaction_fails, SIGSEGV);
   tcase_add_test(tc_core, write_to_writeable_transaction_does_not_fail);
   tcase_add_test(tc_core, write_to_writeable_transaction_visible_after_commit);
+  tcase_add_test(tc_core, write_to_writeable_transaction_not_visible_before_end_of_transaction);
   tcase_add_test(tc_core, write_to_writeable_transaction_not_visible_after_abort);
   // END TESTS
   suite_add_tcase(s, tc_core);

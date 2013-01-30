@@ -60,8 +60,9 @@ struct kstate_transaction {
   uint32_t   id;          // A simple id for this transaction
   uint32_t   permissions; // The permissions for this transaction
 
-  void      *map_addr;    // The shared memory associated with it
-  size_t     map_length;  // and how much shared memory there is
+  void      *orig_map_addr; // The shared memory associated with the state
+  void      *map_addr;      // Our own shared memory, starting as a copy
+  size_t     map_length;    // The length of both of those
 };
 
 static int num_digits(int value)
@@ -585,29 +586,29 @@ extern int kstate_subscribe_state(kstate_state_p         state,
 
   state->permissions = permissions;
 
-  int oflag = 0;
-  mode_t mode = 0;
+  int shm_flag = 0;
+  mode_t shm_mode = 0;
   bool creating = false;
   if (permissions & KSTATE_WRITE) {
-    oflag = O_RDWR | O_CREAT;
+    shm_flag = O_RDWR | O_CREAT;
     // XXX Allow everyone any access, at least for the moment
     // XXX It is possible that we will want another version of this function
     // XXX which allows specifying the mode (the "normal" version of the
     // XXX function should always be the one that defaults to a "sensible"
     // XXX mode, whatever we decide that to be).
-    mode = S_IRWXU | S_IRWXG | S_IRWXO;
+    shm_mode = S_IRWXU | S_IRWXG | S_IRWXO;
     creating = true;
   } else {
     // We always allow read
-    oflag = O_RDONLY;
+    shm_flag = O_RDONLY;
   }
 
-  int shm_fd = shm_open(state->name, oflag, mode);
+  int shm_fd = shm_open(state->name, shm_flag, shm_mode);
   if (shm_fd < 0) {
     int rv = errno;
     fprintf(stderr, "!!! kstate_subscribe_state:"
             " Error in shm_open(\"%s\", 0x%x, 0x%x): %d %s\n",
-            state->name, oflag, mode, rv, strerror(rv));
+            state->name, shm_flag, shm_mode, rv, strerror(rv));
     free(state->name);
     state->name = NULL;
     state->permissions = 0;
@@ -781,6 +782,42 @@ extern void kstate_free_transaction(kstate_transaction_p *transaction)
   }
 }
 
+static int clear_transaction(char *caller, kstate_transaction_p  transaction)
+{
+  if (transaction->orig_map_addr != 0 && transaction->orig_map_addr != MAP_FAILED) {
+    int rv = munmap(transaction->orig_map_addr, transaction->map_length);
+    if (rv) {
+      rv = errno;
+      fprintf(stderr, "!!! %s: ", caller);
+      kstate_print_transaction(stderr, " Error in freeing shared memory for ", transaction, false);
+      fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+      return -rv;
+    }
+    transaction->orig_map_addr = 0;
+  }
+
+  if (transaction->map_addr != 0 && transaction->map_addr != MAP_FAILED) {
+    int rv = munmap(transaction->map_addr, transaction->map_length);
+    if (rv) {
+      rv = errno;
+      fprintf(stderr, "!!! %s: ", caller);
+      kstate_print_transaction(stderr, " Error in freeing local memory for ", transaction, false);
+      fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+      return -rv;
+    }
+    transaction->map_addr = 0;
+  }
+  transaction->map_length = 0;
+
+  if (transaction->name) {
+    free(transaction->name);
+    transaction->name = NULL;
+  }
+
+  transaction->permissions = 0;
+  return 0;
+}
+
 /*
  * Start a new transaction on a state.
  *
@@ -857,74 +894,78 @@ extern int kstate_start_transaction(kstate_transaction_p  transaction,
   strcpy(transaction->name, state->name);
   transaction->map_length = state->map_length;
 
-  // Some defaults just for now...
-  int prot = PROT_READ;
-  int flags = MAP_SHARED;
-
-  int oflag = 0;
-  mode_t mode = 0;
+  // First off, we need to be able to see what the state has
+  // If we're a write transaction (i.e., can commit) then we need to be able
+  // to write back to it if we ever do commit...
+  int map_prot = PROT_READ;
+  int shm_flag = 0;
+  mode_t shm_mode = 0;
   if (permissions & KSTATE_WRITE) {
-    prot |= PROT_WRITE;
-    oflag = O_RDWR;
+    map_prot |= PROT_WRITE;
+    shm_flag = O_RDWR;
   } else {
-    oflag = O_RDONLY;
+    shm_flag = O_RDONLY;
   }
 
-  int shm_fd = shm_open(transaction->name, oflag, mode);
+  int shm_fd = shm_open(transaction->name, shm_flag, shm_mode);
   if (shm_fd < 0) {
     int rv = errno;
     fprintf(stderr, "!!! kstate_start_transaction:"
             " Error in shm_open(\"%s\", 0x%x, 0x%x): %d %s\n",
-            transaction->name, oflag, mode, rv, strerror(rv));
+            transaction->name, shm_flag, shm_mode, rv, strerror(rv));
     free(transaction->name);
     transaction->name = NULL;
     transaction->permissions = 0;
     return -rv;
   }
 
-  transaction->map_addr = mmap(NULL, transaction->map_length, prot, flags, shm_fd, 0);
-  if (transaction->map_addr == MAP_FAILED) {
+  transaction->orig_map_addr = mmap(NULL, transaction->map_length, map_prot, MAP_SHARED, shm_fd, 0);
+  if (transaction->orig_map_addr == MAP_FAILED) {
     int rv = errno;
     kstate_print_state(stderr, "!!! kstate_start_transaction:"
                        " Error in mapping shared memory for Transaction on ", state, false);
     fprintf(stderr, ": %d %s\n", rv, strerror(rv));
-    free(transaction->name);
-    transaction->name = NULL;
-    transaction->permissions = 0;
-    transaction->map_addr = 0;
-    transaction->map_length = 0;
+    clear_transaction("kstate_start_transaction", transaction);
     close(shm_fd);
     return -rv;
   }
   close(shm_fd);
 
-  kstate_print_transaction(stdout, "Started ", transaction, true);
+  // Then we need our own copy of the data, which is independent of that
+  // for the state - both in case the state changes during our transaction,
+  // and also (if we're allowed to) because we might write to our own copy
+  // However, since we're going to make a copy of the original data, we
+  // do need to be able to write to it - at least for the moment
+  transaction->map_addr = mmap(NULL, transaction->map_length,
+                               PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+  if (transaction->map_addr == MAP_FAILED) {
+    int rv = errno;
+    kstate_print_state(stderr, "!!! kstate_start_transaction:"
+                       " Error in mapping local memory for Transaction on ", state, false);
+    fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+    clear_transaction("kstate_start_transaction", transaction);
+    return -rv;
+  }
 
-  return 0;
-}
+  // And obviously we need to copy one to the other...
+  memcpy(transaction->map_addr, transaction->orig_map_addr, transaction->map_length);
 
-static int finish_transaction(char *caller,
-                              kstate_transaction_p  transaction)
-{
-  if (transaction->map_addr != 0 && transaction->map_addr != MAP_FAILED) {
-    int rv = munmap(transaction->map_addr, transaction->map_length);
+  if (!(permissions & KSTATE_WRITE)) {
+    // Revoke permission to write to our internal data
+    int rv = mprotect(transaction->map_addr, transaction->map_length, PROT_READ);
     if (rv) {
-      rv = errno;
-      fprintf(stderr, "!!! %s: ", caller);
-      kstate_print_transaction(stderr, " Error in freeing shared memory for ", transaction, false);
+      int rv = errno;
+      kstate_print_state(stderr, "!!! kstate_start_transaction:"
+                         " Error disallowing write on local memory"
+                         " for Transaction on ", state, false);
       fprintf(stderr, ": %d %s\n", rv, strerror(rv));
+      clear_transaction("kstate_start_transaction", transaction);
       return -rv;
     }
-    transaction->map_addr = 0;
-    transaction->map_length = 0;
   }
 
-  if (transaction->name) {
-    free(transaction->name);
-    transaction->name = NULL;
-  }
+  kstate_print_transaction(stdout, "Started ", transaction, true);
 
-  transaction->permissions = 0;
   return 0;
 }
 
@@ -958,7 +999,7 @@ extern int kstate_abort_transaction(kstate_transaction_p  transaction)
 
   kstate_print_transaction(stdout, "Aborting ", transaction, true);
 
-  int rv = finish_transaction("kstate_abort_transaction", transaction);
+  int rv = clear_transaction("kstate_abort_transaction", transaction);
   return rv;
 }
 
@@ -1001,7 +1042,14 @@ extern int kstate_commit_transaction(struct kstate_transaction  *transaction)
 
   kstate_print_transaction(stdout, "Committing ", transaction, true);
 
-  int rv = finish_transaction("kstate_commit_transaction", transaction);
+  // Has our data actually changed? If not, we've nothing to do
+  // (I'm rather assuming that the comparison is worth doing to avoid an
+  // unnecessary copy - this should probably be checked)
+  if (memcmp(transaction->orig_map_addr, transaction->map_addr, transaction->map_length)) {
+    memcpy(transaction->orig_map_addr, transaction->map_addr, transaction->map_length);
+  }
+
+  int rv = clear_transaction("kstate_commit_transaction", transaction);
   return rv;
 }
 
