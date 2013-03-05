@@ -5,6 +5,8 @@ Kstate
 .. note:: This is a start at documenting our intentions. Expect things to
    change...
 
+.. contents::
+
 What we want to be able to do
 =============================
 We have systems where process A is receiving data many times a second from an
@@ -234,5 +236,76 @@ latest update, but the update as if it were being done at THIS frequency".
 
 Useful references: Keir Frasier's papers on concurrent programming without
 locks, including his thesis "Practical lock-freedom".
+
+Or, it was obvious all along?
+=============================
+So, we have a state holder (or state owner if one wants to be less clever).
+A state owner can declare an interest in a named state, of a particular size.
+Anyone with an interest in that same (named) state will interact with the same
+state. The maximum size probably wins. The first state owner to express an
+interest probably causes the state to come into existence. There is a choice
+whether the state only exists while a state owner with an interest in it still
+has that interest (a state owner can say they are no longer interested in a
+named state), or whether it persists "forever".
+
+All reading or writing of the state is done via transactions.
+
+A state which has never been written to is full of zeroes.
+
+A state owner can start a read transaction (on a state they own). They get
+back a handle, which contains a pointer to the *current* version of the state
+(that "current" is a magic word). The library or other mechanism also updates
+a reference count for that version of the state. If this is the first read
+transaction on that version of the state, then the reference counter will be
+1, if it is the second it will be 2, etc. Whilst the transaction is ongoing,
+the pointer to that version of the state will be valid. When the state owner
+ends the read transaction, they may no longer use the pointer - its state is
+undefined.  When the read transaction is ended, the reference count for that
+version of the state is decremented. If it reaches zero, that version of the
+state can be garbage collected. Note that it is not allowed to *write* to a
+state in a read transaction - doing so will cause some sort of access
+violation or equivalent, as one might expect.
+
+  Things to handle "safely": incrementing and decrementing the reference
+  counter.
+
+A state owner can start a write transaction (on a state they own). They get
+back a handle, which contains a pointer to a *new* version of the state, and
+notionally containing a copy of the current version of the state (as at some
+point during the "start transaction" event. It also contains a reference back
+to the state that is being amended.
+
+  Thus we can assume that the "start a write transaction" event must include
+  the use of an internal read transaction, to give it time to copy the
+  original data for the state without it changing under its feet.
+
+The state owner may (but need not) write to its version of the state. No other
+state owner can see this version of the state whilst the write transaction is
+open. When the write transaction is ended by an abort, the new version of the
+state can be dereferenced and garbage collected. When the write transaction is
+ended by a commit, the library or other mechanism first checks to see if the
+original has been changed (by someone else committing). If it has, then the
+commit will fail, otherwise it want to (safely) swap the pointer to the
+original version of the state for the pointer to the amended version of the
+state. Note that anyone who is still accessing (their own handle referring to)
+the original version of the state will not be able to notice this.
+
+  Things to handle safely: swapping the "this state" pointer from old to new.
+  Any reference counting. The gap between checking to see if the original
+  state has changed and safely swapping the state pointer.
+
+Ideally, we want a state owner process dying to release all its states. We
+know from KBUS how to determine this - a state owner must be equivalent to
+opening a device, and this will then automatically be closed when the process
+dies. Given that, we know the kernel process has to be able to access the
+calls to manipulate the state's state. So we can consider putting that
+handling into the kernel anyway, which means that starting and ending a
+transaction becomes a pair of IOCTLs (is this fast enough?). This puts a lock
+around start/end transaction calls, which makes life a lot simpler, and we end
+up being thread safe, distributed between cores, and so on.o
+
+It may also make it easier to detect when a write is done to state data
+(presumably we're initially making it read-only and trapping an attempted
+write), and makes our handling of buffer allocation, etc., thread safe for us.
 
 .. vim: set filetype=rst tabstop=8 softtabstop=2 shiftwidth=2 expandtab:
